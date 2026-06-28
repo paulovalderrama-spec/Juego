@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>Pong Mobile</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #0a0a0a;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100dvh;
+      overflow: hidden;
+      font-family: 'Courier New', monospace;
+      touch-action: none;
+    }
+
+    #score {
+      color: #fff;
+      font-size: clamp(24px, 6vw, 48px);
+      letter-spacing: 0.3em;
+      margin-bottom: 12px;
+      user-select: none;
+    }
+
+    canvas {
+      display: block;
+      border: 2px solid #333;
+      border-radius: 4px;
+    }
+
+    #message {
+      color: #aaa;
+      font-size: clamp(12px, 3vw, 16px);
+      margin-top: 12px;
+      letter-spacing: 0.1em;
+      user-select: none;
+      min-height: 1.4em;
+      text-align: center;
+    }
+
+    #overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.85);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+      color: #fff;
+    }
+
+    #overlay h1 {
+      font-size: clamp(32px, 10vw, 64px);
+      letter-spacing: 0.2em;
+    }
+
+    #overlay p {
+      color: #aaa;
+      font-size: clamp(14px, 4vw, 20px);
+      text-align: center;
+      padding: 0 20px;
+    }
+
+    #startBtn {
+      background: #fff;
+      color: #000;
+      border: none;
+      padding: 14px 40px;
+      font-size: clamp(16px, 4vw, 22px);
+      font-family: 'Courier New', monospace;
+      font-weight: bold;
+      letter-spacing: 0.15em;
+      cursor: pointer;
+      border-radius: 4px;
+      margin-top: 10px;
+    }
+
+    #startBtn:active { transform: scale(0.96); }
+
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+
+<div id="score">
+  <span id="playerScore">0</span> : <span id="aiScore">0</span>
+</div>
+<canvas id="canvas"></canvas>
+<div id="message">Desliza para mover tu paleta</div>
+
+<div id="overlay">
+  <h1>PONG</h1>
+  <p>Desliza en la parte inferior de la pantalla para mover tu paleta</p>
+  <button id="startBtn">JUGAR</button>
+</div>
+
+<script>
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  const overlay = document.getElementById('overlay');
+  const startBtn = document.getElementById('startBtn');
+  const playerScoreEl = document.getElementById('playerScore');
+  const aiScoreEl = document.getElementById('aiScore');
+  const messageEl = document.getElementById('message');
+
+  // Canvas size
+  const MAX_W = 420;
+  const MAX_H = 680;
+  let W, H;
+
+  function resize() {
+    const vw = window.innerWidth;
+    const vh = window.innerHeight - 80; // space for score + message
+    const ratio = MAX_H / MAX_W;
+    if (vw * ratio <= vh) {
+      W = Math.min(vw - 16, MAX_W);
+    } else {
+      W = Math.floor((vh) / ratio);
+    }
+    H = Math.floor(W * ratio);
+    canvas.width = W;
+    canvas.height = H;
+  }
+
+  // Game state
+  const PADDLE_W = () => Math.max(8, W * 0.025);
+  const PADDLE_H = () => H * 0.18;
+  const BALL_R = () => Math.max(6, W * 0.022);
+  const SPEED_INIT = () => W * 0.007;
+  const SPEED_MAX = () => W * 0.018;
+
+  let playerY, aiY, ballX, ballY, ballVX, ballVY;
+  let playerScore, aiScore;
+  let running = false;
+  let lastTime = 0;
+  let aiError = 0; // simulated AI imprecision
+
+  function reset(serveTo = 'player') {
+    ballX = W / 2;
+    ballY = H / 2;
+    const angle = (Math.random() * 0.5 + 0.2) * (Math.random() < 0.5 ? 1 : -1);
+    const speed = SPEED_INIT();
+    ballVY = speed * angle;
+    ballVX = serveTo === 'player' ? -speed : speed;
+    aiError = (Math.random() - 0.5) * PADDLE_H() * 0.4;
+  }
+
+  function init() {
+    playerY = H / 2 - PADDLE_H() / 2;
+    aiY = H / 2 - PADDLE_H() / 2;
+    playerScore = 0;
+    aiScore = 0;
+    playerScoreEl.textContent = 0;
+    aiScoreEl.textContent = 0;
+    reset('player');
+  }
+
+  // Touch control
+  let touchY = null;
+  let lastTouchY = null;
+
+  canvas.addEventListener('touchstart', e => {
+    e.preventDefault();
+    touchY = e.touches[0].clientY;
+    lastTouchY = touchY;
+  }, { passive: false });
+
+  canvas.addEventListener('touchmove', e => {
+    e.preventDefault();
+    const t = e.touches[0];
+    const dy = t.clientY - lastTouchY;
+    lastTouchY = t.clientY;
+    touchY = t.clientY;
+    const ph = PADDLE_H();
+    playerY = Math.max(0, Math.min(H - ph, playerY + dy));
+  }, { passive: false });
+
+  canvas.addEventListener('touchend', e => {
+    e.preventDefault();
+    touchY = null;
+    lastTouchY = null;
+  }, { passive: false });
+
+  // Mouse fallback for desktop testing
+  let mouseDown = false;
+  let lastMouseY = null;
+  canvas.addEventListener('mousedown', e => { mouseDown = true; lastMouseY = e.clientY; });
+  window.addEventListener('mouseup', () => { mouseDown = false; lastMouseY = null; });
+  canvas.addEventListener('mousemove', e => {
+    if (!mouseDown) return;
+    const dy = e.clientY - lastMouseY;
+    lastMouseY = e.clientY;
+    const ph = PADDLE_H();
+    playerY = Math.max(0, Math.min(H - ph, playerY + dy));
+  });
+
+  function updateAI(dt) {
+    const ph = PADDLE_H();
+    const aiCenter = aiY + ph / 2;
+    const target = ballY + aiError;
+    const speed = W * 0.011 * dt / 16;
+    if (aiCenter < target - 4) aiY = Math.min(H - ph, aiY + speed);
+    else if (aiCenter > target + 4) aiY = Math.max(0, aiY - speed);
+    // Occasionally update imprecision
+    if (Math.random() < 0.01) aiError = (Math.random() - 0.5) * ph * 0.5;
+  }
+
+  function update(dt) {
+    const pw = PADDLE_W();
+    const ph = PADDLE_H();
+    const br = BALL_R();
+    const speedMax = SPEED_MAX();
+
+    ballX += ballVX * dt / 16;
+    ballY += ballVY * dt / 16;
+
+    // Wall bounce top/bottom
+    if (ballY - br < 0) { ballY = br; ballVY = Math.abs(ballVY); }
+    if (ballY + br > H) { ballY = H - br; ballVY = -Math.abs(ballVY); }
+
+    // Player paddle (left)
+    if (
+      ballX - br < pw + 2 &&
+      ballX - br > 0 &&
+      ballY > playerY &&
+      ballY < playerY + ph
+    ) {
+      ballX = pw + 2 + br;
+      const hitPos = (ballY - playerY) / ph - 0.5; // -0.5 to 0.5
+      const speed = Math.min(Math.sqrt(ballVX * ballVX + ballVY * ballVY) * 1.05, speedMax);
+      const angle = hitPos * 1.2;
+      ballVX = Math.abs(speed / Math.sqrt(1 + angle * angle));
+      ballVY = angle * ballVX;
+      messageEl.textContent = '';
+    }
+
+    // AI paddle (right)
+    if (
+      ballX + br > W - pw - 2 &&
+      ballX + br < W &&
+      ballY > aiY &&
+      ballY < aiY + ph
+    ) {
+      ballX = W - pw - 2 - br;
+      const hitPos = (ballY - aiY) / ph - 0.5;
+      const speed = Math.min(Math.sqrt(ballVX * ballVX + ballVY * ballVY) * 1.05, speedMax);
+      const angle = hitPos * 1.2;
+      ballVX = -(Math.abs(speed / Math.sqrt(1 + angle * angle)));
+      ballVY = angle * Math.abs(ballVX);
+    }
+
+    // Score
+    if (ballX - br < 0) {
+      aiScore++;
+      aiScoreEl.textContent = aiScore;
+      messageEl.textContent = aiScore >= 7 ? '¡La IA ganó! Toca para reiniciar' : '';
+      if (aiScore >= 7) { endGame('ai'); return; }
+      reset('ai');
+    }
+    if (ballX + br > W) {
+      playerScore++;
+      playerScoreEl.textContent = playerScore;
+      messageEl.textContent = playerScore >= 7 ? '¡Ganaste! Toca para reiniciar' : '';
+      if (playerScore >= 7) { endGame('player'); return; }
+      reset('player');
+    }
+  }
+
+  function draw() {
+    const pw = PADDLE_W();
+    const ph = PADDLE_H();
+    const br = BALL_R();
+
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = '#111';
+    ctx.fillRect(0, 0, W, H);
+
+    // Center line
+    ctx.setLineDash([H * 0.04, H * 0.03]);
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(W / 2, 0);
+    ctx.lineTo(W / 2, H);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Paddles
+    const pr = 4;
+    ctx.fillStyle = '#fff';
+    roundRect(pw * 0.3, playerY, pw, ph, pr);
+    roundRect(W - pw * 1.3, aiY, pw, ph, pr);
+
+    // Ball
+    ctx.beginPath();
+    ctx.arc(ballX, ballY, br, 0, Math.PI * 2);
+    ctx.fillStyle = '#fff';
+    ctx.fill();
+
+    // Ball glow
+    const grd = ctx.createRadialGradient(ballX, ballY, 0, ballX, ballY, br * 3);
+    grd.addColorStop(0, 'rgba(255,255,255,0.15)');
+    grd.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.beginPath();
+    ctx.arc(ballX, ballY, br * 3, 0, Math.PI * 2);
+    ctx.fillStyle = grd;
+    ctx.fill();
+  }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  let gameOver = false;
+
+  function endGame(winner) {
+    running = false;
+    gameOver = true;
+    messageEl.textContent = winner === 'player' ? '¡Ganaste! Toca para reiniciar' : '¡La IA ganó! Toca para reiniciar';
+    canvas.addEventListener('touchstart', restartOnTouch, { once: false });
+    canvas.addEventListener('mousedown', restartOnClick, { once: false });
+  }
+
+  function restartOnTouch(e) {
+    e.preventDefault();
+    doRestart();
+  }
+  function restartOnClick() { doRestart(); }
+
+  function doRestart() {
+    if (!gameOver) return;
+    canvas.removeEventListener('touchstart', restartOnTouch);
+    canvas.removeEventListener('mousedown', restartOnClick);
+    gameOver = false;
+    messageEl.textContent = 'Desliza para mover tu paleta';
+    init();
+    running = true;
+    requestAnimationFrame(loop);
+  }
+
+  function loop(ts) {
+    if (!running) return;
+    const dt = Math.min(ts - (lastTime || ts), 33);
+    lastTime = ts;
+    updateAI(dt);
+    update(dt);
+    draw();
+    if (running) requestAnimationFrame(loop);
+  }
+
+  startBtn.addEventListener('click', () => {
+    overlay.classList.add('hidden');
+    resize();
+    init();
+    running = true;
+    requestAnimationFrame(loop);
+  });
+
+  window.addEventListener('resize', () => {
+    resize();
+    // Reposition paddles proportionally after resize
+    const ph = PADDLE_H();
+    playerY = Math.max(0, Math.min(H - ph, playerY));
+    aiY = Math.max(0, Math.min(H - ph, aiY));
+  });
+
+  resize();
+</script>
+</body>
+</html>
