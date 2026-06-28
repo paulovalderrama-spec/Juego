@@ -1,587 +1,609 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-  <title>Cars - ¡Toca la pantalla!</title>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no"/>
+  <title>Cars - ¡Atrapa los autos!</title>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      background: #1a90d0;
-      overflow: hidden;
-      touch-action: none;
-      font-family: 'Arial Rounded MT Bold', 'Arial Black', Arial, sans-serif;
-    }
-    canvas { display: block; width: 100vw; height: 100dvh; }
-    #prompt {
-      position: fixed;
-      bottom: 36px;
-      width: 100%;
-      text-align: center;
-      color: #fff;
-      font-size: clamp(18px, 5vw, 28px);
-      font-weight: 900;
-      text-shadow: 0 3px 10px rgba(0,0,0,0.6), 0 0 20px rgba(255,200,0,0.5);
-      pointer-events: none;
-      letter-spacing: 0.05em;
-      animation: bounce 1.4s ease-in-out infinite;
-    }
-    @keyframes bounce {
-      0%,100% { transform: translateY(0) scale(1); }
-      50% { transform: translateY(-6px) scale(1.04); }
-    }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { overflow:hidden; touch-action:none; }
+    canvas { display:block; width:100vw; height:100dvh; }
   </style>
 </head>
 <body>
 <canvas id="c"></canvas>
-<div id="prompt">¡Toca la pantalla! 🏎️</div>
 <script>
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
-const prompt = document.getElementById('prompt');
 let W, H;
-
-function resize() {
-  W = canvas.width = window.innerWidth;
-  H = canvas.height = window.innerHeight;
-}
+function resize() { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; }
 resize();
 window.addEventListener('resize', resize);
 
-// ── Audio ─────────────────────────────────────────────────────────────────────
-const AC = window.AudioContext || window.webkitAudioContext;
+// ── Audio ──────────────────────────────────────────────────────────────────────
 let ac;
-function playCheer(charIdx) {
+function playPop() {
   try {
-    if (!ac) ac = new AC();
-    // Short happy chord
-    const notes = [[523,0],[659,0.08],[784,0.16],[1047,0.24]];
-    notes.forEach(([f, t]) => {
-      const osc = ac.createOscillator();
-      const gain = ac.createGain();
-      osc.connect(gain); gain.connect(ac.destination);
-      osc.frequency.value = f;
-      osc.type = 'sine';
-      gain.gain.setValueAtTime(0, ac.currentTime + t);
-      gain.gain.linearRampToValueAtTime(0.18, ac.currentTime + t + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + t + 0.35);
-      osc.start(ac.currentTime + t);
-      osc.stop(ac.currentTime + t + 0.4);
+    if (!ac) ac = new (window.AudioContext || window.webkitAudioContext)();
+    [880, 1100, 1320].forEach((f, i) => {
+      const o = ac.createOscillator(), g = ac.createGain();
+      o.connect(g); g.connect(ac.destination);
+      o.frequency.value = f; o.type = 'sine';
+      const t = ac.currentTime + i * 0.07;
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(0.18, t + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.28);
+      o.start(t); o.stop(t + 0.32);
     });
   } catch(e) {}
 }
 
-// ── Characters ────────────────────────────────────────────────────────────────
-const CHARS = [
-  { name: 'Rayo McQueen', phrases: ['¡Ka-Chow! ⚡', '¡Soy el número 1! 🏆', '¡Velocidad! 🔥'], draw: drawMcQueen,  color: '#CC0000', glow: '#FF6600' },
-  { name: 'Mater',        phrases: ['¡Tú eres mi mejor amigo! 💛', '¡Bueno eso estuvo!', '¡Yeehaw! 🤠'],         draw: drawMater,    color: '#8B5E1A', glow: '#D4A017' },
-  { name: 'Sally',        phrases: ['¡Qué emocionante! 💙', '¡Fantástico! ✨', '¡Bravo! 💙'],                    draw: drawSally,    color: '#1E90FF', glow: '#87CEEB' },
-  { name: 'Doc Hudson',   phrases: ['¡Bien hecho, campeón! ⭐', '¡Excelente! 🏅', '¡Así se hace! 🎖️'],         draw: drawDoc,      color: '#0D47A1', glow: '#42A5F5' },
-  { name: 'Ramone',       phrases: ['¡Eso es arte, ese! 💜', '¡Ay, caramba! 🎨', '¡Pintón! 💜'],                draw: drawRamone,   color: '#7B1FA2', glow: '#CE93D8' },
-  { name: 'Chick Hicks',  phrases: ['¡Woohoo! 💚', '¡Genial! 🎉', '¡Sí, sí, sí! 🟢'],                         draw: drawChick,    color: '#1B5E20', glow: '#66BB6A' },
-];
-let charIdx = 0;
+// ── Sizes ─────────────────────────────────────────────────────────────────────
+function HL() { return Math.min(W, H) * 0.1; }   // half-length of car
+function HW() { return HL() * 0.46; }             // half-width of car
 
-// ── Car drawing helpers ────────────────────────────────────────────────────────
-function wheel(ctx, x, y, r, hubColor) {
-  ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2);
-  ctx.fillStyle='#1a1a1a'; ctx.fill();
-  ctx.beginPath(); ctx.arc(x,y,r*0.55,0,Math.PI*2);
-  ctx.fillStyle='#999'; ctx.fill();
-  ctx.beginPath(); ctx.arc(x,y,r*0.3,0,Math.PI*2);
-  ctx.fillStyle=hubColor||'#ccc'; ctx.fill();
-}
-
-function eye(ctx, x, y, rx, ry, irisColor, squint) {
-  ctx.save();
-  ctx.beginPath(); ctx.ellipse(x,y,rx,ry,0,0,Math.PI*2);
-  ctx.fillStyle='#fff'; ctx.fill();
-  ctx.beginPath(); ctx.ellipse(x,y,rx*0.56,ry*0.56,0,0,Math.PI*2);
-  ctx.fillStyle=irisColor||'#3399ff'; ctx.fill();
-  ctx.beginPath(); ctx.arc(x,y,rx*0.28,0,Math.PI*2);
-  ctx.fillStyle='#111'; ctx.fill();
-  if(squint){
-    ctx.beginPath(); ctx.ellipse(x,y-ry*0.3,rx,ry*0.55,0,Math.PI,Math.PI*2);
-    ctx.fillStyle='rgba(0,0,0,0.35)'; ctx.fill();
-  }
+// ── Top-down wheel helper ─────────────────────────────────────────────────────
+function wheel(ctx, wx, wy, wl, ww, hub) {
+  ctx.save(); ctx.translate(wx, wy);
+  ctx.beginPath(); ctx.ellipse(0,0,wl,ww,0,0,Math.PI*2); ctx.fillStyle='#111'; ctx.fill();
+  ctx.beginPath(); ctx.ellipse(0,0,wl*.55,ww*.55,0,0,Math.PI*2); ctx.fillStyle='#777'; ctx.fill();
+  ctx.beginPath(); ctx.ellipse(0,0,wl*.28,ww*.28,0,0,Math.PI*2); ctx.fillStyle=hub; ctx.fill();
   ctx.restore();
 }
 
-function drawMcQueen(ctx, cx, cy, sc, t) {
-  ctx.save(); ctx.translate(cx, cy + Math.sin(t*0.006)*5*sc); ctx.scale(sc,sc);
+// ── McQueen (top-down, front = +X) ───────────────────────────────────────────
+function drawMcQueen(ctx, x, y, angle, hl, hw) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(angle);
   // shadow
-  ctx.beginPath(); ctx.ellipse(0,40,60,9,0,0,Math.PI*2);
-  ctx.fillStyle='rgba(0,0,0,0.22)'; ctx.fill();
-  // spoiler
-  ctx.beginPath(); ctx.moveTo(52,-18); ctx.lineTo(62,-32); ctx.lineTo(62,-18);
-  ctx.fillStyle='#AA0000'; ctx.fill();
-  // body
+  ctx.beginPath(); ctx.ellipse(hl*.07,hw*.14,hl*.9,hw*.84,0,0,Math.PI*2);
+  ctx.fillStyle='rgba(0,0,0,.28)'; ctx.fill();
+  // big rear spoiler
+  ctx.beginPath(); ctx.rect(-hl-hw*.18,-hw*.9,hw*.2,hw*1.8);
+  ctx.fillStyle='#880000'; ctx.fill();
+  // body – red teardrop
   ctx.beginPath();
-  ctx.moveTo(-62,18); ctx.bezierCurveTo(-65,-2,-48,-12,-22,-22);
-  ctx.lineTo(18,-30); ctx.bezierCurveTo(38,-30,52,-16,58,-2);
-  ctx.lineTo(62,18); ctx.closePath();
-  ctx.fillStyle='#DD1111'; ctx.fill();
+  ctx.moveTo(hl,0);
+  ctx.bezierCurveTo(hl*.85,-hw*.95,hl*.18,-hw*1.05,-hl*.4,-hw*.98);
+  ctx.lineTo(-hl*.84,-hw*.65); ctx.lineTo(-hl,-hw*.3); ctx.lineTo(-hl,hw*.3);
+  ctx.lineTo(-hl*.84,hw*.65); ctx.lineTo(-hl*.4,hw*.98);
+  ctx.bezierCurveTo(hl*.18,hw*1.05,hl*.85,hw*.95,hl,0);
+  ctx.closePath(); ctx.fillStyle='#DD1111'; ctx.fill();
   ctx.strokeStyle='#990000'; ctx.lineWidth=2; ctx.stroke();
-  // highlight
-  ctx.beginPath(); ctx.moveTo(-55,0); ctx.bezierCurveTo(-30,-20,20,-28,52,-8);
-  ctx.strokeStyle='rgba(255,120,120,0.5)'; ctx.lineWidth=4; ctx.stroke();
+  // shine
+  ctx.save(); ctx.clip();
+  const sh=ctx.createLinearGradient(-hl*.5,-hw*.9,hl*.3,-hw*.1);
+  sh.addColorStop(0,'rgba(255,255,255,0)'); sh.addColorStop(.5,'rgba(255,160,160,.4)'); sh.addColorStop(1,'rgba(255,255,255,0)');
+  ctx.fillStyle=sh; ctx.fill(); ctx.restore();
   // windshield
+  ctx.beginPath(); ctx.moveTo(hl*.25,-hw*.58); ctx.lineTo(hl*.72,-hw*.28); ctx.lineTo(hl*.72,hw*.28); ctx.lineTo(hl*.25,hw*.58); ctx.closePath();
+  ctx.fillStyle='rgba(140,215,255,.88)'; ctx.fill(); ctx.strokeStyle='#0055AA'; ctx.lineWidth=1.5; ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(hl*.3,-hw*.5); ctx.lineTo(hl*.66,-hw*.18); ctx.strokeStyle='rgba(255,255,255,.55)'; ctx.lineWidth=2; ctx.stroke();
+  // rear window
+  ctx.beginPath(); ctx.moveTo(-hl*.42,-hw*.52); ctx.lineTo(-hl*.72,-hw*.38); ctx.lineTo(-hl*.72,hw*.38); ctx.lineTo(-hl*.42,hw*.52); ctx.closePath();
+  ctx.fillStyle='rgba(100,175,230,.7)'; ctx.fill();
+  // lightning bolt on roof
   ctx.beginPath();
-  ctx.moveTo(-2,-29); ctx.lineTo(34,-29); ctx.lineTo(44,-10); ctx.lineTo(-2,-10);
-  ctx.closePath(); ctx.fillStyle='rgba(120,200,255,0.85)'; ctx.fill();
-  ctx.strokeStyle='#333'; ctx.lineWidth=1.5; ctx.stroke();
-  // eyes
-  eye(ctx, 8,-20, 10,8,'#4488FF',true);
-  eye(ctx,26,-20, 10,8,'#4488FF',true);
-  // lightning bolt
-  ctx.beginPath();
-  ctx.moveTo(-38,-4); ctx.lineTo(-26,-18); ctx.lineTo(-20,-9);
-  ctx.lineTo(-10,-22); ctx.lineTo(-14,-9); ctx.lineTo(-4,-9);
-  ctx.lineTo(-20,8); ctx.lineTo(-24,-2); ctx.closePath();
-  ctx.fillStyle='#FFD700'; ctx.fill(); ctx.strokeStyle='#FF8C00'; ctx.lineWidth=1; ctx.stroke();
-  // #95
-  ctx.fillStyle='#fff'; ctx.font='bold 13px Arial'; ctx.textAlign='center';
-  ctx.fillText('95',-46,10);
-  // grille
-  ctx.beginPath(); ctx.moveTo(-62,2); ctx.lineTo(-62,14); ctx.lineTo(-50,14); ctx.lineTo(-50,2);
-  ctx.fillStyle='#888'; ctx.fill(); ctx.strokeStyle='#555'; ctx.lineWidth=1; ctx.stroke();
-  wheel(ctx,-40,30,16,'#CC0000'); wheel(ctx,38,30,16,'#CC0000');
+  ctx.moveTo(hl*.14,-hw*.32); ctx.lineTo(hl*.27,-hw*.04); ctx.lineTo(hl*.17,-hw*.04);
+  ctx.lineTo(hl*.3,hw*.32); ctx.lineTo(hl*.17,hw*.04); ctx.lineTo(hl*.27,hw*.04); ctx.lineTo(hl*.1,-hw*.32);
+  ctx.closePath(); ctx.fillStyle='#FFD700'; ctx.fill(); ctx.strokeStyle='#CC8800'; ctx.lineWidth=1; ctx.stroke();
+  // "95"
+  ctx.fillStyle='#fff'; ctx.font=`bold ${hw*.75}px 'Arial Black',Arial`;
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.strokeStyle='#CC0000'; ctx.lineWidth=3; ctx.strokeText('95',-hl*.32,0); ctx.fillText('95',-hl*.32,0);
+  // wheels
+  const wl=hw*.42,ww=hw*.22;
+  [[hl*.56,-hw*1.0],[hl*.56,hw*1.0],[-hl*.44,-hw*1.0],[-hl*.44,hw*1.0]].forEach(([a,b])=>wheel(ctx,a,b,wl,ww,'#CC0000'));
   ctx.restore();
 }
 
-function drawMater(ctx, cx, cy, sc, t) {
-  ctx.save(); ctx.translate(cx, cy + Math.sin(t*0.006+1)*5*sc); ctx.scale(sc,sc);
-  ctx.beginPath(); ctx.ellipse(0,45,62,9,0,0,Math.PI*2);
-  ctx.fillStyle='rgba(0,0,0,0.22)'; ctx.fill();
-  // tow hook arm
-  ctx.beginPath(); ctx.moveTo(55,0); ctx.lineTo(70,-20); ctx.lineTo(72,-10);
-  ctx.strokeStyle='#666'; ctx.lineWidth=5; ctx.stroke();
-  // body (boxy truck)
-  ctx.beginPath(); ctx.roundRect(-60,-10,120,38,6);
-  ctx.fillStyle='#8B5A1A'; ctx.fill(); ctx.strokeStyle='#5a3a0a'; ctx.lineWidth=2; ctx.stroke();
-  // cab
-  ctx.beginPath(); ctx.roundRect(-55,-35,70,28,8);
+// ── Mater (top-down) ──────────────────────────────────────────────────────────
+function drawMater(ctx, x, y, angle, hl, hw) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(angle);
+  ctx.beginPath(); ctx.ellipse(hl*.07,hw*.14,hl*.98,hw*.9,0,0,Math.PI*2);
+  ctx.fillStyle='rgba(0,0,0,.28)'; ctx.fill();
+  // tow arm + hook (at back = -X)
+  ctx.beginPath(); ctx.moveTo(-hl,0); ctx.lineTo(-hl*1.45,-hw*.15); ctx.lineTo(-hl*1.45,hw*.15); ctx.closePath();
+  ctx.fillStyle='#666'; ctx.fill();
+  ctx.beginPath(); ctx.arc(-hl*1.48,0,hw*.2,0,Math.PI*2); ctx.strokeStyle='#999'; ctx.lineWidth=4; ctx.stroke();
+  // truck bed
+  ctx.beginPath(); ctx.roundRect(-hl*.82,-hw*.9,hl*.88,hw*1.8,4);
+  ctx.fillStyle='#6B4510'; ctx.fill(); ctx.strokeStyle='#3a2200'; ctx.lineWidth=2; ctx.stroke();
+  // cab (front)
+  ctx.beginPath(); ctx.roundRect(hl*.06,-hw*.94,hl*.74,hw*1.88,6);
   ctx.fillStyle='#9B6A2A'; ctx.fill(); ctx.strokeStyle='#5a3a0a'; ctx.lineWidth=2; ctx.stroke();
+  // cab shine
+  ctx.save(); ctx.clip();
+  const cg=ctx.createLinearGradient(hl*.06,-hw*.94,hl*.8,0);
+  cg.addColorStop(0,'rgba(180,130,60,.45)'); cg.addColorStop(1,'rgba(100,60,0,0)');
+  ctx.fillStyle=cg; ctx.fill(); ctx.restore();
+  // windshield
+  ctx.beginPath(); ctx.moveTo(hl*.22,-hw*.6); ctx.lineTo(hl*.72,-hw*.44); ctx.lineTo(hl*.72,hw*.44); ctx.lineTo(hl*.22,hw*.6); ctx.closePath();
+  ctx.fillStyle='rgba(135,210,255,.82)'; ctx.fill(); ctx.strokeStyle='#4A2800'; ctx.lineWidth=1.5; ctx.stroke();
   // rust patches
-  ctx.fillStyle='rgba(160,80,0,0.4)';
-  ctx.beginPath(); ctx.ellipse(-30,5,12,6,0.3,0,Math.PI*2); ctx.fill();
-  ctx.beginPath(); ctx.ellipse(20,15,9,5,-0.2,0,Math.PI*2); ctx.fill();
-  // windshield
-  ctx.beginPath(); ctx.roundRect(-48,-32,58,20,5);
-  ctx.fillStyle='rgba(120,200,255,0.8)'; ctx.fill(); ctx.strokeStyle='#333'; ctx.lineWidth=1.5; ctx.stroke();
-  // eyes
-  eye(ctx,-22,-24,10,8,'#55AA55',false);
-  eye(ctx,8,-24,10,8,'#55AA55',false);
-  // buck teeth
-  ctx.fillStyle='#fffde0';
-  ctx.beginPath(); ctx.roundRect(-14,-6,10,14,2); ctx.fill();
-  ctx.beginPath(); ctx.roundRect(-1,-6,10,14,2); ctx.fill();
-  ctx.strokeStyle='#ccc'; ctx.lineWidth=1;
-  ctx.beginPath(); ctx.moveTo(-4,-6); ctx.lineTo(-4,8); ctx.stroke();
-  // dents
-  ctx.strokeStyle='rgba(80,40,0,0.5)'; ctx.lineWidth=2;
-  ctx.beginPath(); ctx.arc(35,10,8,0.5,2.5); ctx.stroke();
-  ctx.beginPath(); ctx.arc(-38,8,6,0.5,2.5); ctx.stroke();
-  wheel(ctx,-38,38,17,'#8B5A1A'); wheel(ctx,38,38,17,'#8B5A1A');
+  ctx.fillStyle='rgba(150,70,0,.35)';
+  [[hl*.3,-hw*.3,hw*.25,hw*.15],[- hl*.35,hw*.22,hw*.18,hw*.12],[hl*.6,hw*.5,hw*.14,hw*.1]].forEach(([a,b,c,d])=>{
+    ctx.beginPath(); ctx.ellipse(a,b,c,d,.3,0,Math.PI*2); ctx.fill();
+  });
+  // dent lines
+  ctx.strokeStyle='rgba(80,40,0,.5)'; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.moveTo(-hl*.5,-hw*.7); ctx.lineTo(-hl*.28,-hw*.5); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(-hl*.52,hw*.45); ctx.lineTo(-hl*.62,hw*.22); ctx.stroke();
+  // wheels
+  const wl=hw*.44,ww=hw*.24;
+  [[hl*.56,-hw*.98],[hl*.56,hw*.98],[-hl*.44,-hw*.98],[-hl*.44,hw*.98]].forEach(([a,b])=>wheel(ctx,a,b,wl,ww,'#8B5A1A'));
   ctx.restore();
 }
 
-function drawSally(ctx, cx, cy, sc, t) {
-  ctx.save(); ctx.translate(cx, cy + Math.sin(t*0.006+2)*5*sc); ctx.scale(sc,sc);
-  ctx.beginPath(); ctx.ellipse(0,38,58,8,0,0,Math.PI*2);
-  ctx.fillStyle='rgba(0,0,0,0.2)'; ctx.fill();
-  // body - sleek Porsche shape
+// ── Sally (top-down) ──────────────────────────────────────────────────────────
+function drawSally(ctx, x, y, angle, hl, hw) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(angle);
+  ctx.beginPath(); ctx.ellipse(hl*.07,hw*.14,hl*.88,hw*.84,0,0,Math.PI*2);
+  ctx.fillStyle='rgba(0,0,0,.24)'; ctx.fill();
+  // body – smooth Porsche
   ctx.beginPath();
-  ctx.moveTo(-60,15); ctx.bezierCurveTo(-62,-5,-40,-18,-10,-24);
-  ctx.lineTo(20,-26); ctx.bezierCurveTo(42,-26,56,-12,60,-2);
-  ctx.lineTo(60,15); ctx.closePath();
-  ctx.fillStyle='#29B6F6'; ctx.fill(); ctx.strokeStyle='#0277BD'; ctx.lineWidth=2; ctx.stroke();
-  // highlight
-  ctx.beginPath(); ctx.moveTo(-48,-2); ctx.bezierCurveTo(-20,-20,10,-24,50,-10);
-  ctx.strokeStyle='rgba(180,240,255,0.6)'; ctx.lineWidth=4; ctx.stroke();
+  ctx.moveTo(hl,0);
+  ctx.bezierCurveTo(hl*.9,-hw*.82,hl*.5,-hw*1.04,0,-hw*1.02);
+  ctx.bezierCurveTo(-hl*.42,-hw*.98,-hl*.82,-hw*.74,-hl,-hw*.38);
+  ctx.lineTo(-hl,hw*.38);
+  ctx.bezierCurveTo(-hl*.82,hw*.74,-hl*.42,hw*.98,0,hw*1.02);
+  ctx.bezierCurveTo(hl*.5,hw*1.04,hl*.9,hw*.82,hl,0);
+  ctx.closePath(); ctx.fillStyle='#29B6F6'; ctx.fill(); ctx.strokeStyle='#0277BD'; ctx.lineWidth=2; ctx.stroke();
+  // shine
+  ctx.save(); ctx.clip();
+  const sh=ctx.createLinearGradient(-hl*.4,-hw*.9,hl*.4,-hw*.1);
+  sh.addColorStop(0,'rgba(255,255,255,0)'); sh.addColorStop(.45,'rgba(180,235,255,.45)'); sh.addColorStop(1,'rgba(255,255,255,0)');
+  ctx.fillStyle=sh; ctx.fill(); ctx.restore();
   // windshield
-  ctx.beginPath();
-  ctx.moveTo(-8,-23); ctx.lineTo(26,-25); ctx.lineTo(40,-10); ctx.lineTo(-8,-10);
-  ctx.closePath(); ctx.fillStyle='rgba(135,220,255,0.8)'; ctx.fill();
-  ctx.strokeStyle='#0277BD'; ctx.lineWidth=1.5; ctx.stroke();
-  // eyes with lashes
-  eye(ctx,6,-18,10,8,'#3399FF',false);
-  eye(ctx,22,-18,10,8,'#3399FF',false);
-  // lashes
-  ctx.strokeStyle='#222'; ctx.lineWidth=1.5;
-  [[-2,-24],[1,-25],[4,-25],[7,-24]].forEach(([lx,ly])=>{ ctx.beginPath(); ctx.moveTo(lx,ly); ctx.lineTo(lx-1,ly-3); ctx.stroke(); });
-  [[18,-24],[21,-25],[24,-25],[27,-24]].forEach(([lx,ly])=>{ ctx.beginPath(); ctx.moveTo(lx,ly); ctx.lineTo(lx-1,ly-3); ctx.stroke(); });
-  // grille + headlights
-  ctx.beginPath(); ctx.roundRect(-58,2,14,10,3); ctx.fillStyle='#FFD700'; ctx.fill();
-  ctx.beginPath(); ctx.roundRect(-58,6,8,6,2); ctx.fillStyle='#333'; ctx.fill();
-  wheel(ctx,-38,28,15,'#29B6F6'); wheel(ctx,36,28,15,'#29B6F6');
+  ctx.beginPath(); ctx.moveTo(hl*.22,-hw*.6); ctx.lineTo(hl*.68,-hw*.28); ctx.lineTo(hl*.68,hw*.28); ctx.lineTo(hl*.22,hw*.6); ctx.closePath();
+  ctx.fillStyle='rgba(130,215,255,.86)'; ctx.fill(); ctx.strokeStyle='#0277BD'; ctx.lineWidth=1.5; ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(hl*.28,-hw*.52); ctx.lineTo(hl*.62,-hw*.18); ctx.strokeStyle='rgba(255,255,255,.6)'; ctx.lineWidth=2; ctx.stroke();
+  // rear window
+  ctx.beginPath(); ctx.moveTo(-hl*.36,-hw*.58); ctx.lineTo(-hl*.7,-hw*.42); ctx.lineTo(-hl*.7,hw*.42); ctx.lineTo(-hl*.36,hw*.58); ctx.closePath();
+  ctx.fillStyle='rgba(100,190,245,.72)'; ctx.fill();
+  // tattoo stripe on roof
+  ctx.beginPath(); ctx.moveTo(hl*.05,-hw*.3); ctx.bezierCurveTo(-hl*.2,-hw*.35,-hl*.45,-hw*.2,-hl*.5,0);
+  ctx.bezierCurveTo(-hl*.45,hw*.2,-hl*.2,hw*.35,hl*.05,hw*.3);
+  ctx.strokeStyle='rgba(0,100,200,.55)'; ctx.lineWidth=3; ctx.stroke();
+  // wheels
+  const wl=hw*.4,ww=hw*.22;
+  [[hl*.56,-hw*1.0],[hl*.56,hw*1.0],[-hl*.44,-hw*1.0],[-hl*.44,hw*1.0]].forEach(([a,b])=>wheel(ctx,a,b,wl,ww,'#29B6F6'));
   ctx.restore();
 }
 
-function drawDoc(ctx, cx, cy, sc, t) {
-  ctx.save(); ctx.translate(cx, cy + Math.sin(t*0.006+3)*5*sc); ctx.scale(sc,sc);
-  ctx.beginPath(); ctx.ellipse(0,40,60,9,0,0,Math.PI*2);
-  ctx.fillStyle='rgba(0,0,0,0.22)'; ctx.fill();
-  // fins at back
-  ctx.beginPath(); ctx.moveTo(52,-5); ctx.lineTo(62,-22); ctx.lineTo(62,5); ctx.closePath();
+// ── Doc Hudson (top-down) ────────────────────────────────────────────────────
+function drawDoc(ctx, x, y, angle, hl, hw) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(angle);
+  ctx.beginPath(); ctx.ellipse(hl*.07,hw*.12,hl*.96,hw*.88,0,0,Math.PI*2);
+  ctx.fillStyle='rgba(0,0,0,.28)'; ctx.fill();
+  // tail fins at back (1951 Hudson's signature feature)
+  ctx.beginPath(); ctx.moveTo(-hl,-hw*.5); ctx.lineTo(-hl*1.18,-hw*.92); ctx.lineTo(-hl*.85,-hw*.84); ctx.lineTo(-hl,-hw*.32); ctx.closePath();
   ctx.fillStyle='#0D47A1'; ctx.fill();
-  ctx.beginPath(); ctx.moveTo(52,5); ctx.lineTo(62,22); ctx.lineTo(62,10); ctx.closePath();
+  ctx.beginPath(); ctx.moveTo(-hl,hw*.5); ctx.lineTo(-hl*1.18,hw*.92); ctx.lineTo(-hl*.85,hw*.84); ctx.lineTo(-hl,hw*.32); ctx.closePath();
   ctx.fillStyle='#0D47A1'; ctx.fill();
-  // body - 1951 Hudson style (long, low, boxy)
+  // body – long, stately
   ctx.beginPath();
-  ctx.moveTo(-62,18); ctx.bezierCurveTo(-64,0,-50,-10,-20,-18);
-  ctx.lineTo(18,-20); ctx.bezierCurveTo(40,-20,55,-10,60,0);
-  ctx.lineTo(62,18); ctx.closePath();
-  ctx.fillStyle='#1565C0'; ctx.fill(); ctx.strokeStyle='#0D47A1'; ctx.lineWidth=2; ctx.stroke();
-  // body stripe
-  ctx.beginPath(); ctx.moveTo(-60,4); ctx.lineTo(60,4); ctx.lineTo(60,10); ctx.lineTo(-60,10); ctx.closePath();
-  ctx.fillStyle='rgba(255,255,255,0.12)'; ctx.fill();
+  ctx.moveTo(hl,0);
+  ctx.bezierCurveTo(hl*.9,-hw*.7,hl*.5,-hw*.96,0,-hw*.95);
+  ctx.lineTo(-hl*.5,-hw*.92); ctx.lineTo(-hl*.85,-hw*.64); ctx.lineTo(-hl,-hw*.32);
+  ctx.lineTo(-hl,hw*.32); ctx.lineTo(-hl*.85,hw*.64); ctx.lineTo(-hl*.5,hw*.92); ctx.lineTo(0,hw*.95);
+  ctx.bezierCurveTo(hl*.5,hw*.96,hl*.9,hw*.7,hl,0);
+  ctx.closePath(); ctx.fillStyle='#1565C0'; ctx.fill(); ctx.strokeStyle='#0D47A1'; ctx.lineWidth=2; ctx.stroke();
+  // shine
+  ctx.save(); ctx.clip();
+  const sh=ctx.createLinearGradient(-hl*.3,-hw*.9,hl*.3,0);
+  sh.addColorStop(0,'rgba(255,255,255,0)'); sh.addColorStop(.45,'rgba(100,160,255,.38)'); sh.addColorStop(1,'rgba(255,255,255,0)');
+  ctx.fillStyle=sh; ctx.fill(); ctx.restore();
+  // chrome side stripe
+  ctx.beginPath(); ctx.moveTo(hl*.5,-hw*.84); ctx.lineTo(-hl*.8,-hw*.86); ctx.strokeStyle='rgba(180,215,255,.65)'; ctx.lineWidth=3; ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(hl*.5,hw*.84); ctx.lineTo(-hl*.8,hw*.86); ctx.strokeStyle='rgba(180,215,255,.65)'; ctx.lineWidth=3; ctx.stroke();
   // windshield
-  ctx.beginPath();
-  ctx.moveTo(-10,-17); ctx.lineTo(22,-19); ctx.lineTo(34,-8); ctx.lineTo(-10,-8);
-  ctx.closePath(); ctx.fillStyle='rgba(135,200,255,0.75)'; ctx.fill();
-  ctx.strokeStyle='#0a3070'; ctx.lineWidth=1.5; ctx.stroke();
-  // stern eyes (squinting)
-  eye(ctx,2,-13,10,7,'#2244AA',true);
-  eye(ctx,20,-13,10,7,'#2244AA',true);
-  // eyebrows - stern
-  ctx.strokeStyle='#0a2060'; ctx.lineWidth=3;
-  ctx.beginPath(); ctx.moveTo(-5,-17); ctx.lineTo(9,-20); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(14,-18); ctx.lineTo(28,-20); ctx.stroke();
-  // "51" number
-  ctx.fillStyle='rgba(255,255,255,0.9)'; ctx.font='bold 12px Arial'; ctx.textAlign='center';
-  ctx.fillText('51',-38,12);
-  // grille (horizontal bars)
-  for(let i=0;i<3;i++){
-    ctx.beginPath(); ctx.moveTo(-60,-4+i*5); ctx.lineTo(-50,-4+i*5);
-    ctx.strokeStyle='#aaa'; ctx.lineWidth=2; ctx.stroke();
-  }
-  wheel(ctx,-40,30,16,'#1565C0'); wheel(ctx,38,30,16,'#1565C0');
+  ctx.beginPath(); ctx.moveTo(hl*.1,-hw*.58); ctx.lineTo(hl*.58,-hw*.32); ctx.lineTo(hl*.58,hw*.32); ctx.lineTo(hl*.1,hw*.58); ctx.closePath();
+  ctx.fillStyle='rgba(120,195,255,.8)'; ctx.fill(); ctx.strokeStyle='#0a3070'; ctx.lineWidth=1.5; ctx.stroke();
+  // "51"
+  ctx.fillStyle='rgba(255,255,255,.9)'; ctx.font=`bold ${hw*.75}px 'Arial Black',Arial`;
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.strokeStyle='#0D47A1'; ctx.lineWidth=3; ctx.strokeText('51',-hl*.32,0); ctx.fillText('51',-hl*.32,0);
+  // wheels
+  const wl=hw*.42,ww=hw*.22;
+  [[hl*.56,-hw*1.0],[hl*.56,hw*1.0],[-hl*.43,-hw*1.0],[-hl*.43,hw*1.0]].forEach(([a,b])=>wheel(ctx,a,b,wl,ww,'#1565C0'));
   ctx.restore();
 }
 
-function drawRamone(ctx, cx, cy, sc, t) {
-  ctx.save(); ctx.translate(cx, cy + Math.sin(t*0.006+4)*5*sc); ctx.scale(sc,sc);
-  ctx.beginPath(); ctx.ellipse(0,36,65,8,0,0,Math.PI*2);
-  ctx.fillStyle='rgba(0,0,0,0.22)'; ctx.fill();
-  // lowrider - very low profile
+// ── Ramone (top-down) ─────────────────────────────────────────────────────────
+function drawRamone(ctx, x, y, angle, hl, hw) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(angle);
+  ctx.beginPath(); ctx.ellipse(hl*.07,hw*.12,hl*.92,hw*1.02,0,0,Math.PI*2);
+  ctx.fillStyle='rgba(0,0,0,.25)'; ctx.fill();
+  // wide lowrider body
   ctx.beginPath();
-  ctx.moveTo(-65,12); ctx.bezierCurveTo(-68,-6,-45,-15,-5,-19);
-  ctx.lineTo(20,-19); ctx.bezierCurveTo(48,-19,62,-8,66,-2);
-  ctx.lineTo(66,12); ctx.closePath();
-  ctx.fillStyle='#8E24AA'; ctx.fill(); ctx.strokeStyle='#4A148C'; ctx.lineWidth=2; ctx.stroke();
-  // flame details
-  ctx.save();
-  const flameGrad = ctx.createLinearGradient(-65,0,0,0);
-  flameGrad.addColorStop(0,'rgba(255,100,0,0.8)');
-  flameGrad.addColorStop(1,'rgba(255,200,0,0)');
-  ctx.beginPath();
-  ctx.moveTo(-65,5); ctx.bezierCurveTo(-55,-8,-45,2,-35,-10);
-  ctx.bezierCurveTo(-25,2,-18,-6,-10,2); ctx.lineTo(-10,12); ctx.lineTo(-65,12);
-  ctx.fillStyle=flameGrad; ctx.fill();
-  ctx.restore();
-  // windshield
-  ctx.beginPath();
-  ctx.moveTo(-5,-18); ctx.lineTo(28,-18); ctx.lineTo(40,-8); ctx.lineTo(-5,-8);
-  ctx.closePath(); ctx.fillStyle='rgba(135,200,255,0.8)'; ctx.fill();
-  ctx.strokeStyle='#4A148C'; ctx.lineWidth=1.5; ctx.stroke();
-  // eyes
-  eye(ctx,6,-14,10,7,'#AA44CC',false);
-  eye(ctx,24,-14,10,7,'#AA44CC',false);
-  // chrome details
-  ctx.strokeStyle='rgba(200,200,255,0.7)'; ctx.lineWidth=2;
-  ctx.beginPath(); ctx.moveTo(-40,0); ctx.lineTo(-40,12); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(-48,0); ctx.lineTo(-48,12); ctx.stroke();
-  // whitewall wheels
-  wheel(ctx,-42,26,16,'#8E24AA'); wheel(ctx,42,26,16,'#8E24AA');
-  // whitewall ring
-  [[-42,26],[42,26]].forEach(([wx,wy])=>{
-    ctx.beginPath(); ctx.arc(wx,wy,11,0,Math.PI*2);
-    ctx.strokeStyle='#fff'; ctx.lineWidth=2; ctx.stroke();
+  ctx.moveTo(hl,0);
+  ctx.bezierCurveTo(hl*.88,-hw*1.12,hl*.4,-hw*1.2,-hl*.2,-hw*1.14);
+  ctx.lineTo(-hl*.7,-hw*.97); ctx.lineTo(-hl,-hw*.5); ctx.lineTo(-hl,hw*.5);
+  ctx.lineTo(-hl*.7,hw*.97); ctx.lineTo(-hl*.2,hw*1.14);
+  ctx.bezierCurveTo(hl*.4,hw*1.2,hl*.88,hw*1.12,hl,0);
+  ctx.closePath(); ctx.fillStyle='#8E24AA'; ctx.fill(); ctx.strokeStyle='#4A148C'; ctx.lineWidth=2; ctx.stroke();
+  // flame on left side (visible from above)
+  const fg=ctx.createLinearGradient(-hl,-hw,hl*.2,-hw*.6);
+  fg.addColorStop(0,'rgba(255,100,0,.9)'); fg.addColorStop(1,'rgba(255,200,0,0)');
+  ctx.beginPath(); ctx.moveTo(-hl,-hw*.96); ctx.bezierCurveTo(-hl*.6,-hw*1.22,-hl*.15,-hw*.92,hl*.1,-hw*1.08);
+  ctx.bezierCurveTo(hl*.35,-hw*.88,hl*.55,-hw*1.02,hl*.62,-hw*.9); ctx.lineTo(hl*.62,-hw*.72); ctx.lineTo(-hl,-hw*.72); ctx.closePath();
+  ctx.fillStyle=fg; ctx.fill();
+  // flame on right side
+  ctx.beginPath(); ctx.moveTo(-hl,hw*.96); ctx.bezierCurveTo(-hl*.6,hw*1.22,-hl*.15,hw*.92,hl*.1,hw*1.08);
+  ctx.bezierCurveTo(hl*.35,hw*.88,hl*.55,hw*1.02,hl*.62,hw*.9); ctx.lineTo(hl*.62,hw*.72); ctx.lineTo(-hl,hw*.72); ctx.closePath();
+  ctx.fillStyle=fg; ctx.fill();
+  // shine
+  ctx.save(); ctx.clip();
+  const sh=ctx.createLinearGradient(-hl*.4,-hw,hl*.4,0);
+  sh.addColorStop(0,'rgba(255,255,255,0)'); sh.addColorStop(.45,'rgba(220,140,255,.4)'); sh.addColorStop(1,'rgba(255,255,255,0)');
+  ctx.fillStyle=sh; ctx.fill(); ctx.restore();
+  // windshield (tinted purple)
+  ctx.beginPath(); ctx.moveTo(hl*.2,-hw*.62); ctx.lineTo(hl*.7,-hw*.32); ctx.lineTo(hl*.7,hw*.32); ctx.lineTo(hl*.2,hw*.62); ctx.closePath();
+  ctx.fillStyle='rgba(180,100,255,.7)'; ctx.fill(); ctx.strokeStyle='#4A148C'; ctx.lineWidth=1.5; ctx.stroke();
+  // whitewall tires
+  const wl=hw*.46,ww=hw*.26;
+  [[hl*.56,-hw*1.14],[hl*.56,hw*1.14],[-hl*.44,-hw*1.14],[-hl*.44,hw*1.14]].forEach(([a,b])=>{
+    ctx.save(); ctx.translate(a,b);
+    ctx.beginPath(); ctx.ellipse(0,0,wl,ww,0,0,Math.PI*2); ctx.fillStyle='#111'; ctx.fill();
+    ctx.beginPath(); ctx.ellipse(0,0,wl*.76,ww*.76,0,0,Math.PI*2); ctx.strokeStyle='#ddd'; ctx.lineWidth=2.5; ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(0,0,wl*.5,ww*.5,0,0,Math.PI*2); ctx.fillStyle='#777'; ctx.fill();
+    ctx.beginPath(); ctx.ellipse(0,0,wl*.28,ww*.28,0,0,Math.PI*2); ctx.fillStyle='#8E24AA'; ctx.fill();
+    ctx.restore();
   });
   ctx.restore();
 }
 
-function drawChick(ctx, cx, cy, sc, t) {
-  ctx.save(); ctx.translate(cx, cy + Math.sin(t*0.006+5)*5*sc); ctx.scale(sc,sc);
-  ctx.beginPath(); ctx.ellipse(0,40,60,9,0,0,Math.PI*2);
-  ctx.fillStyle='rgba(0,0,0,0.22)'; ctx.fill();
-  // rear spoiler
-  ctx.beginPath(); ctx.moveTo(48,-18); ctx.lineTo(60,-28); ctx.lineTo(60,-18); ctx.lineTo(48,-10);
-  ctx.fillStyle='#1B5E20'; ctx.fill();
+// ── Chick Hicks (top-down) ────────────────────────────────────────────────────
+function drawChick(ctx, x, y, angle, hl, hw) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(angle);
+  ctx.beginPath(); ctx.ellipse(hl*.07,hw*.14,hl*.96,hw*.88,0,0,Math.PI*2);
+  ctx.fillStyle='rgba(0,0,0,.3)'; ctx.fill();
+  // big rear spoiler (Chick has a massive one)
+  ctx.beginPath(); ctx.rect(-hl-hw*.25,-hw*.98,hw*.28,hw*1.96); ctx.fillStyle='#1B5E20'; ctx.fill(); ctx.strokeStyle='#0a2e0a'; ctx.lineWidth=1; ctx.stroke();
+  // spoiler struts
+  ctx.fillStyle='#444';
+  ctx.beginPath(); ctx.rect(-hl*.82,-hw*.14,hl*.08,hw*.28); ctx.fill();
   // body
   ctx.beginPath();
-  ctx.moveTo(-60,16); ctx.bezierCurveTo(-62,-4,-46,-14,-18,-22);
-  ctx.lineTo(16,-28); ctx.bezierCurveTo(36,-28,50,-14,56,-4);
-  ctx.lineTo(58,16); ctx.closePath();
-  ctx.fillStyle='#2E7D32'; ctx.fill(); ctx.strokeStyle='#1B5E20'; ctx.lineWidth=2; ctx.stroke();
-  // side vent details
-  ctx.strokeStyle='rgba(0,0,0,0.4)'; ctx.lineWidth=2;
-  for(let i=0;i<3;i++){ ctx.beginPath(); ctx.moveTo(-50+i*12,0); ctx.lineTo(-46+i*12,14); ctx.stroke(); }
-  // windshield
-  ctx.beginPath();
-  ctx.moveTo(-4,-27); ctx.lineTo(30,-27); ctx.lineTo(42,-10); ctx.lineTo(-4,-10);
-  ctx.closePath(); ctx.fillStyle='rgba(120,200,100,0.7)'; ctx.fill();
-  ctx.strokeStyle='#1B5E20'; ctx.lineWidth=1.5; ctx.stroke();
-  // menacing eyes
-  eye(ctx,8,-20,10,7,'#00CC44',true);
-  eye(ctx,26,-20,10,7,'#00CC44',true);
-  // menacing eyebrows
-  ctx.strokeStyle='#000'; ctx.lineWidth=3;
-  ctx.beginPath(); ctx.moveTo(2,-25); ctx.lineTo(15,-22); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(20,-22); ctx.lineTo(33,-25); ctx.stroke();
-  // smirk
-  ctx.beginPath(); ctx.moveTo(-40,5); ctx.bezierCurveTo(-30,3,-20,10,-10,6);
-  ctx.strokeStyle='#111'; ctx.lineWidth=2; ctx.stroke();
-  // #86
-  ctx.fillStyle='#fff'; ctx.font='bold 13px Arial'; ctx.textAlign='center';
-  ctx.fillText('86',-44,10);
-  wheel(ctx,-38,28,16,'#2E7D32'); wheel(ctx,36,28,16,'#2E7D32');
+  ctx.moveTo(hl,0);
+  ctx.bezierCurveTo(hl*.82,-hw*.92,hl*.15,-hw*1.04,-hl*.38,-hw*.98);
+  ctx.lineTo(-hl*.82,-hw*.68); ctx.lineTo(-hl,-hw*.32); ctx.lineTo(-hl,hw*.32);
+  ctx.lineTo(-hl*.82,hw*.68); ctx.lineTo(-hl*.38,hw*.98);
+  ctx.bezierCurveTo(hl*.15,hw*1.04,hl*.82,hw*.92,hl,0);
+  ctx.closePath(); ctx.fillStyle='#2E7D32'; ctx.fill(); ctx.strokeStyle='#1B5E20'; ctx.lineWidth=2; ctx.stroke();
+  // shine
+  ctx.save(); ctx.clip();
+  const sh=ctx.createLinearGradient(-hl*.4,-hw*.9,hl*.3,0);
+  sh.addColorStop(0,'rgba(255,255,255,0)'); sh.addColorStop(.45,'rgba(100,200,100,.35)'); sh.addColorStop(1,'rgba(255,255,255,0)');
+  ctx.fillStyle=sh; ctx.fill(); ctx.restore();
+  // hood vents
+  ctx.strokeStyle='rgba(0,0,0,.45)'; ctx.lineWidth=2;
+  for(let i=0;i<3;i++){ctx.beginPath();ctx.moveTo(hl*.75-i*hl*.1,-hw*.22);ctx.lineTo(hl*.75-i*hl*.1,hw*.22);ctx.stroke();}
+  // windshield (green tinted)
+  ctx.beginPath(); ctx.moveTo(hl*.22,-hw*.6); ctx.lineTo(hl*.7,-hw*.28); ctx.lineTo(hl*.7,hw*.28); ctx.lineTo(hl*.22,hw*.6); ctx.closePath();
+  ctx.fillStyle='rgba(60,180,80,.68)'; ctx.fill(); ctx.strokeStyle='#1B5E20'; ctx.lineWidth=1.5; ctx.stroke();
+  // rear window
+  ctx.beginPath(); ctx.moveTo(-hl*.42,-hw*.54); ctx.lineTo(-hl*.72,-hw*.4); ctx.lineTo(-hl*.72,hw*.4); ctx.lineTo(-hl*.42,hw*.54); ctx.closePath();
+  ctx.fillStyle='rgba(50,160,70,.62)'; ctx.fill();
+  // "86"
+  ctx.fillStyle='rgba(255,255,255,.92)'; ctx.font=`bold ${hw*.75}px 'Arial Black',Arial`;
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.strokeStyle='#1B5E20'; ctx.lineWidth=3; ctx.strokeText('86',-hl*.3,0); ctx.fillText('86',-hl*.3,0);
+  // wheels
+  const wl=hw*.42,ww=hw*.22;
+  [[hl*.56,-hw*1.0],[hl*.56,hw*1.0],[-hl*.43,-hw*1.0],[-hl*.43,hw*1.0]].forEach(([a,b])=>wheel(ctx,a,b,wl,ww,'#2E7D32'));
   ctx.restore();
 }
 
-// ── Background ────────────────────────────────────────────────────────────────
-function drawBackground() {
-  // Sky gradient
-  const sky = ctx.createLinearGradient(0,0,0,H*0.65);
-  sky.addColorStop(0,'#1a90d0'); sky.addColorStop(1,'#87CEEB');
-  ctx.fillStyle=sky; ctx.fillRect(0,0,W,H);
+// ── Character data ─────────────────────────────────────────────────────────────
+const CHARS = [
+  { name:'Rayo McQueen', color:'#DD1111', phrases:['¡Ka-Chow! ⚡','¡Soy el mejor! 🏆','¡Velocidad! 🔥'], draw:drawMcQueen },
+  { name:'Mater',        color:'#8B5A1A', phrases:['¡Tú ganas, amigo! 💛','¡Bueno eso estuvo!','¡Yeehaw! 🤠'], draw:drawMater  },
+  { name:'Sally',        color:'#1E90FF', phrases:['¡Excelente! 💙','¡Fantástico! ✨','¡Bravo! 🎉'],       draw:drawSally  },
+  { name:'Doc Hudson',   color:'#1565C0', phrases:['¡Bien hecho! ⭐','¡Campeón! 🏅','¡Así se hace!'],      draw:drawDoc    },
+  { name:'Ramone',       color:'#8E24AA', phrases:['¡Eso es arte! 💜','¡Ay caramba! 🎨','¡Pintón! 💜'],    draw:drawRamone },
+  { name:'Chick Hicks',  color:'#2E7D32', phrases:['¡Woohoo! 💚','¡Genial! 🎉','¡Sí sí sí! 🏁'],         draw:drawChick  },
+];
 
-  // Sun
-  const sunX=W*0.82, sunY=H*0.12, sunR=H*0.07;
-  const sunGlow=ctx.createRadialGradient(sunX,sunY,0,sunX,sunY,sunR*2.5);
-  sunGlow.addColorStop(0,'rgba(255,230,80,0.6)'); sunGlow.addColorStop(1,'rgba(255,200,0,0)');
-  ctx.beginPath(); ctx.arc(sunX,sunY,sunR*2.5,0,Math.PI*2);
-  ctx.fillStyle=sunGlow; ctx.fill();
-  ctx.beginPath(); ctx.arc(sunX,sunY,sunR,0,Math.PI*2);
-  ctx.fillStyle='#FFD700'; ctx.fill();
+// ── Game cars ─────────────────────────────────────────────────────────────────
+const NUM_CARS = 5;
+let charCursor = 0;
 
-  // Radiator Springs rock formations
-  const rocks=[
-    {x:W*0.05,w:W*0.12,h:H*0.28,color:'#c45e2a'},
-    {x:W*0.14,w:W*0.08,h:H*0.38,color:'#d46a32'},
-    {x:W*0.72,w:W*0.14,h:H*0.32,color:'#c45e2a'},
-    {x:W*0.84,w:W*0.12,h:H*0.22,color:'#d46a32'},
-  ];
-  rocks.forEach(r=>{
-    const gy=H*0.65-r.h;
-    ctx.beginPath();
-    ctx.moveTo(r.x,H*0.65);
-    ctx.lineTo(r.x,gy+r.h*0.15);
-    ctx.bezierCurveTo(r.x+r.w*0.1,gy,r.x+r.w*0.4,gy*0.98,r.x+r.w*0.5,gy);
-    ctx.bezierCurveTo(r.x+r.w*0.6,gy*0.98,r.x+r.w*0.9,gy+r.h*0.1,r.x+r.w,gy+r.h*0.2);
-    ctx.lineTo(r.x+r.w,H*0.65);
-    ctx.fillStyle=r.color; ctx.fill();
-    // rock shadow side
-    ctx.beginPath();
-    ctx.moveTo(r.x+r.w*0.5,gy); ctx.lineTo(r.x+r.w,gy+r.h*0.2); ctx.lineTo(r.x+r.w,H*0.65);
-    ctx.lineTo(r.x+r.w*0.5,H*0.65); ctx.closePath();
-    ctx.fillStyle='rgba(0,0,0,0.18)'; ctx.fill();
-  });
+class GameCar {
+  constructor(charIdx, initial = true) {
+    this.charIdx = charIdx % CHARS.length;
+    this.char = CHARS[this.charIdx];
+    this.angle = Math.random() * Math.PI * 2;
+    this.targetAngle = this.angle;
+    this.turnTimer = 0;
+    this.turnInterval = 1800 + Math.random() * 2200;
+    this.alpha = 1;
+    this.dying = false;
+    this.dyingT = 0;
+    this.spawning = false;
+    this.spawnT = 0;
+    if (initial) {
+      const m = HL() * 1.5;
+      this.x = m + Math.random() * (W - m * 2);
+      this.y = m + Math.random() * (H - m * 2);
+      this.alpha = 1;
+    } else {
+      this.spawnFromEdge();
+    }
+  }
 
-  // Ground / desert
-  const ground=ctx.createLinearGradient(0,H*0.62,0,H*0.72);
-  ground.addColorStop(0,'#d4863c'); ground.addColorStop(1,'#b8692a');
-  ctx.fillStyle=ground; ctx.fillRect(0,H*0.62,W,H*0.12);
+  spawnFromEdge() {
+    const h = HL();
+    const side = Math.floor(Math.random() * 4);
+    const m = h * 1.5;
+    if (side===0){ this.x=m+Math.random()*(W-2*m); this.y=-h; this.angle=Math.PI*.5; }
+    else if(side===1){ this.x=W+h; this.y=m+Math.random()*(H-2*m); this.angle=Math.PI; }
+    else if(side===2){ this.x=m+Math.random()*(W-2*m); this.y=H+h; this.angle=-Math.PI*.5; }
+    else { this.x=-h; this.y=m+Math.random()*(H-2*m); this.angle=0; }
+    this.targetAngle = this.angle + (Math.random()-.5)*.8;
+    this.alpha = 0; this.spawning = true; this.spawnT = 0;
+  }
 
-  // Road
-  const roadTop=H*0.70, roadH=H*0.30;
-  const road=ctx.createLinearGradient(0,roadTop,0,H);
-  road.addColorStop(0,'#444'); road.addColorStop(1,'#333');
-  ctx.fillStyle=road; ctx.fillRect(0,roadTop,W,roadH);
+  speed() { return (1.6 + score * 0.04) * Math.min(W, H) / 500; }
 
-  // Road edge lines
-  ctx.fillStyle='#FFD700';
-  ctx.fillRect(0,roadTop+2,W,4);
+  update(dt) {
+    if (this.dying) { this.dyingT += dt; this.alpha = Math.max(0, 1 - this.dyingT/200); return; }
+    if (this.spawning) { this.spawnT += dt; this.alpha = Math.min(1, this.spawnT/400); if(this.spawnT>=400)this.spawning=false; }
 
-  // Center dashed line
-  ctx.setLineDash([W*0.06,W*0.04]);
-  ctx.strokeStyle='#FFD700'; ctx.lineWidth=4;
-  ctx.beginPath(); ctx.moveTo(0,roadTop+roadH*0.5); ctx.lineTo(W,roadTop+roadH*0.5);
-  ctx.stroke(); ctx.setLineDash([]);
+    this.turnTimer += dt;
+    if (this.turnTimer > this.turnInterval) {
+      this.turnTimer = 0; this.turnInterval = 1500 + Math.random()*2500;
+      this.targetAngle = this.angle + (Math.random()-.5)*Math.PI*1.3;
+    }
 
-  // Route 66 sign
-  const sx=W*0.5-28, sy=H*0.66;
-  ctx.fillStyle='#111'; ctx.beginPath(); ctx.roundRect(sx,sy,56,36,6); ctx.fill();
-  ctx.strokeStyle='#fff'; ctx.lineWidth=2; ctx.stroke();
-  ctx.fillStyle='#fff'; ctx.font='bold 11px Arial'; ctx.textAlign='center';
-  ctx.fillText('RUTA',W*0.5,sy+14);
-  ctx.font='bold 14px Arial'; ctx.fillText('66',W*0.5,sy+30);
+    const h = HL(), m = h * 2.2;
+    if (this.x < m)     this.targetAngle = lerp(this.targetAngle, 0, .2);
+    if (this.x > W - m) this.targetAngle = lerp(this.targetAngle, Math.PI, .2);
+    if (this.y < m)     this.targetAngle = lerp(this.targetAngle, Math.PI*.5, .2);
+    if (this.y > H - m) this.targetAngle = lerp(this.targetAngle, -Math.PI*.5, .2);
+
+    let da = this.targetAngle - this.angle;
+    while (da > Math.PI) da -= Math.PI*2;
+    while (da < -Math.PI) da += Math.PI*2;
+    this.angle += da * .028;
+
+    const sp = this.speed();
+    this.x += Math.cos(this.angle) * sp * dt/16;
+    this.y += Math.sin(this.angle) * sp * dt/16;
+    const hc = HL()*1.1;
+    this.x = Math.max(hc, Math.min(W-hc, this.x));
+    this.y = Math.max(hc, Math.min(H-hc, this.y));
+  }
+
+  hit(tx, ty) {
+    const h=HL(), hw=HW();
+    const dx=tx-this.x, dy=ty-this.y;
+    const cos=Math.cos(-this.angle), sin=Math.sin(-this.angle);
+    const lx=dx*cos-dy*sin, ly=dx*sin+dy*cos;
+    return (lx/h)*(lx/h)*.65 + (ly/hw)*(ly/hw)*.65 < 1.4;
+  }
+
+  draw(ctx) {
+    ctx.save(); ctx.globalAlpha = this.alpha;
+    this.char.draw(ctx, this.x, this.y, this.angle, HL(), HW());
+    ctx.restore();
+  }
 }
+
+function lerp(a,b,t){ return a+(b-a)*t; }
 
 // ── Particles ─────────────────────────────────────────────────────────────────
-const COLORS=['#FF5252','#FFD740','#69F0AE','#40C4FF','#EA80FC','#FF6D00','#FFFFFF','#FF80AB'];
-class Particle {
-  constructor(x,y) {
-    this.x=x; this.y=y;
-    this.vx=(Math.random()-0.5)*14;
-    this.vy=-Math.random()*14-6;
-    this.color=COLORS[Math.floor(Math.random()*COLORS.length)];
-    this.size=Math.random()*10+5;
-    this.life=1;
-    this.decay=Math.random()*0.015+0.012;
-    this.isstar=Math.random()<0.4;
-    this.rot=Math.random()*Math.PI;
-    this.rotV=(Math.random()-0.5)*0.2;
+const PCOLS=['#FF5252','#FFD740','#69F0AE','#40C4FF','#EA80FC','#FF6D00','#FFFFFF','#FF80AB'];
+class Spark {
+  constructor(x,y,col){
+    this.x=x;this.y=y;
+    this.vx=(Math.random()-.5)*18;this.vy=-Math.random()*16-4;
+    this.col=col||PCOLS[Math.floor(Math.random()*PCOLS.length)];
+    this.sz=Math.random()*10+5;this.life=1;this.decay=Math.random()*.018+.013;
+    this.star=Math.random()<.42;this.rot=Math.random()*Math.PI;this.rv=(Math.random()-.5)*.24;
   }
-  update() {
-    this.x+=this.vx; this.y+=this.vy;
-    this.vy+=0.45; this.vx*=0.97;
-    this.life-=this.decay;
-    this.rot+=this.rotV;
-  }
-  draw(ctx) {
-    ctx.save(); ctx.globalAlpha=Math.max(0,this.life);
-    ctx.translate(this.x,this.y); ctx.rotate(this.rot);
-    ctx.fillStyle=this.color;
-    if(this.isstar){
-      // 5-point star
+  update(){this.x+=this.vx;this.y+=this.vy;this.vy+=.48;this.vx*=.97;this.life-=this.decay;this.rot+=this.rv;}
+  dead(){return this.life<=0;}
+  draw(ctx){
+    ctx.save();ctx.globalAlpha=Math.max(0,this.life);ctx.translate(this.x,this.y);ctx.rotate(this.rot);
+    ctx.fillStyle=this.col;
+    if(this.star){
       ctx.beginPath();
       for(let i=0;i<5;i++){
-        const a=i*Math.PI*2/5 - Math.PI/2;
-        const ai=a+Math.PI/5;
-        i===0?ctx.moveTo(Math.cos(a)*this.size,Math.sin(a)*this.size)
-             :ctx.lineTo(Math.cos(a)*this.size,Math.sin(a)*this.size);
-        ctx.lineTo(Math.cos(ai)*this.size*0.42,Math.sin(ai)*this.size*0.42);
-      }
-      ctx.closePath();
-    } else {
-      ctx.beginPath(); ctx.roundRect(-this.size/2,-this.size/3,this.size,this.size*0.6,2);
-    }
-    ctx.fill(); ctx.restore();
+        const a=i*Math.PI*2/5-Math.PI/2,ai=a+Math.PI/5;
+        i===0?ctx.moveTo(Math.cos(a)*this.sz,Math.sin(a)*this.sz):ctx.lineTo(Math.cos(a)*this.sz,Math.sin(a)*this.sz);
+        ctx.lineTo(Math.cos(ai)*this.sz*.42,Math.sin(ai)*this.sz*.42);
+      }ctx.closePath();
+    }else{ctx.beginPath();ctx.roundRect(-this.sz/2,-this.sz/3,this.sz,this.sz*.6,2);}
+    ctx.fill();ctx.restore();
   }
 }
 
-// ── Ring burst ────────────────────────────────────────────────────────────────
-class RingBurst {
-  constructor(x,y,color){ this.x=x; this.y=y; this.r=0; this.life=1; this.color=color||'#FFD700'; }
-  update(){ this.r+=8; this.life-=0.04; }
+class FloatText {
+  constructor(x,y,text,col){
+    this.x=x;this.y=y;this.text=text;this.col=col||'#FFD700';
+    this.vy=-3.5;this.life=1;this.decay=.018;
+    this.fs=Math.min(W,H)*.08;
+  }
+  update(){this.y+=this.vy;this.vy*=.94;this.life-=this.decay;}
+  dead(){return this.life<=0;}
   draw(ctx){
-    ctx.save(); ctx.globalAlpha=Math.max(0,this.life);
-    ctx.beginPath(); ctx.arc(this.x,this.y,this.r,0,Math.PI*2);
-    ctx.strokeStyle=this.color; ctx.lineWidth=3*(1-this.r/200); ctx.stroke();
+    ctx.save();ctx.globalAlpha=Math.max(0,this.life);
+    ctx.font=`bold ${this.fs}px 'Arial Black',Arial`;ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.strokeStyle='rgba(0,0,0,.85)';ctx.lineWidth=7;ctx.strokeText(this.text,this.x,this.y);
+    ctx.fillStyle=this.col;ctx.fillText(this.text,this.x,this.y);
     ctx.restore();
   }
 }
 
-// ── Celebration ───────────────────────────────────────────────────────────────
-class Celebration {
-  constructor(x, y, char) {
-    this.x = x; this.y = y; this.char = char;
-    this.phrase = char.phrases[Math.floor(Math.random()*char.phrases.length)];
-    this.particles = Array.from({length:40}, ()=>new Particle(x,y));
-    this.rings = [new RingBurst(x,y,char.glow), new RingBurst(x,y,'#ffffff')];
-    this.rings[1].r = 30;
-    this.t = 0; this.life = 1;
-    this.carX = x < W/2 ? -120 : W+120;
-    this.carTargetX = W/2;
-    this.carY = H*0.78;
-    this.carScale = Math.min(W,H)*0.0013;
-    this.arrived = false;
-    this.holdTimer = 0;
-    this.leaving = false;
-    this.carVX = (this.carTargetX - this.carX) * 0.06;
-    this.textAlpha = 0;
-    this.nameAlpha = 0;
+class NameText {
+  constructor(x,y,text,col){
+    this.x=x;this.y=y;this.text=text;this.col=col;
+    this.life=1;this.decay=.014;this.vy=-1.5;
+    this.fs=Math.min(W,H)*.048;
   }
-  update(dt) {
-    this.t += dt;
-    this.particles.forEach(p=>p.update());
-    this.rings.forEach(r=>r.update());
-    // Car drives in
-    if(!this.arrived){
-      this.carX += (this.carTargetX - this.carX) * 0.08;
-      if(Math.abs(this.carX - this.carTargetX) < 2){ this.arrived=true; }
-    } else {
-      this.holdTimer += dt;
-      this.textAlpha = Math.min(1, this.textAlpha+0.06);
-      this.nameAlpha = Math.min(1, this.nameAlpha+0.04);
-      if(this.holdTimer > 1600) this.leaving=true;
-    }
-    if(this.leaving){ this.life -= 0.018; this.carX += this.carX < W/2 ? -6 : 6; }
-  }
-  done() { return this.life <= 0; }
-  draw(ctx) {
-    ctx.save(); ctx.globalAlpha=Math.max(0,this.life);
-    this.particles.forEach(p=>p.draw(ctx));
-    this.rings.forEach(r=>r.draw(ctx));
-    // Car
-    const flip = this.x > W/2;
-    ctx.save();
-    if(flip){ ctx.translate(this.carX*2,0); ctx.scale(-1,1); }
-    this.char.draw(ctx, this.carX, this.carY, this.carScale, this.t);
-    ctx.restore();
-    // Character name
-    if(this.arrived && this.nameAlpha > 0){
-      ctx.globalAlpha = Math.max(0,this.life) * this.nameAlpha;
-      const nameY = this.carY - 90*this.carScale - 10;
-      ctx.font = `bold ${Math.round(W*0.045)}px Arial`;
-      ctx.textAlign='center';
-      ctx.strokeStyle='#000'; ctx.lineWidth=5; ctx.strokeText(this.char.name, this.carX, nameY);
-      ctx.fillStyle=this.char.color; ctx.fillText(this.char.name, this.carX, nameY);
-    }
-    // Phrase
-    if(this.arrived && this.textAlpha > 0){
-      ctx.globalAlpha = Math.max(0,this.life) * this.textAlpha;
-      const py = this.carY - 90*this.carScale - 10 - W*0.055;
-      const fs = Math.round(W*0.06);
-      ctx.font = `bold ${fs}px Arial`;
-      ctx.textAlign='center';
-      ctx.strokeStyle='rgba(0,0,0,0.8)'; ctx.lineWidth=6; ctx.strokeText(this.phrase, W/2, py);
-      ctx.fillStyle='#FFD700'; ctx.fillText(this.phrase, W/2, py);
-    }
+  update(){this.y+=this.vy;this.vy*=.97;this.life-=this.decay;}
+  dead(){return this.life<=0;}
+  draw(ctx){
+    ctx.save();ctx.globalAlpha=Math.max(0,this.life)*.9;
+    ctx.font=`bold ${this.fs}px 'Arial Black',Arial`;ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.strokeStyle='rgba(0,0,0,.85)';ctx.lineWidth=5;ctx.strokeText(this.text,this.x,this.y);
+    ctx.fillStyle=this.col;ctx.fillText(this.text,this.x,this.y);
     ctx.restore();
   }
+}
+
+// ── Background (Radiator Springs top-down) ────────────────────────────────────
+function drawBg() {
+  // Desert floor
+  const bg=ctx.createLinearGradient(0,0,W,H);
+  bg.addColorStop(0,'#C88030');bg.addColorStop(.5,'#BE7428');bg.addColorStop(1,'#B06820');
+  ctx.fillStyle=bg;ctx.fillRect(0,0,W,H);
+
+  // Subtle terrain lines
+  ctx.strokeStyle='rgba(160,90,10,.22)';ctx.lineWidth=1;
+  for(let i=1;i<9;i++){
+    ctx.beginPath();
+    ctx.moveTo(0,H*i/9);
+    ctx.bezierCurveTo(W*.3,H*i/9+H*.025,W*.7,H*i/9-H*.025,W,H*i/9);
+    ctx.stroke();
+  }
+
+  // Road running through middle
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(-W*.05,H*.42);
+  ctx.bezierCurveTo(W*.28,H*.38,W*.72,H*.58,W*1.05,H*.5);
+  ctx.lineWidth=H*.13;ctx.strokeStyle='#4a4a4a';ctx.stroke();
+  // road edge lines
+  ctx.lineWidth=3;ctx.strokeStyle='rgba(255,255,255,.6)';
+  for(const off of [-H*.063,H*.063]){
+    ctx.beginPath();
+    ctx.moveTo(-W*.05,H*.42+off);
+    ctx.bezierCurveTo(W*.28,H*.38+off,W*.72,H*.58+off,W*1.05,H*.5+off);
+    ctx.stroke();
+  }
+  // center dash
+  ctx.setLineDash([W*.05,W*.04]);ctx.lineWidth=4;ctx.strokeStyle='rgba(255,220,0,.7)';
+  ctx.beginPath();
+  ctx.moveTo(-W*.05,H*.42);ctx.bezierCurveTo(W*.28,H*.38,W*.72,H*.58,W*1.05,H*.5);
+  ctx.stroke();ctx.setLineDash([]);
+  ctx.restore();
+
+  // Rock/mesa shadows at edges
+  const rocks=[
+    {x:W*.07,y:H*.1,rx:W*.045,ry:H*.035},
+    {x:W*.91,y:H*.18,rx:W*.05,ry:H*.03},
+    {x:W*.05,y:H*.78,rx:W*.04,ry:H*.028},
+    {x:W*.93,y:H*.72,rx:W*.048,ry:H*.032},
+    {x:W*.5,y:H*.05,rx:W*.06,ry:H*.022},
+    {x:W*.48,y:H*.95,rx:W*.055,ry:H*.025},
+  ];
+  rocks.forEach(r=>{
+    ctx.beginPath();ctx.ellipse(r.x,r.y,r.rx,r.ry,0,0,Math.PI*2);
+    ctx.fillStyle='rgba(130,60,0,.38)';ctx.fill();
+    ctx.beginPath();ctx.ellipse(r.x-r.rx*.1,r.y-r.ry*.2,r.rx*.5,r.ry*.5,0,0,Math.PI*2);
+    ctx.fillStyle='rgba(200,120,30,.28)';ctx.fill();
+  });
+
+  // "RADIATOR SPRINGS" text faint on ground
+  ctx.save();
+  ctx.globalAlpha=.08;
+  ctx.font=`bold ${W*.06}px 'Arial Black',Arial`;
+  ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillStyle='#000';
+  ctx.fillText('RADIATOR SPRINGS',W*.5,H*.88);
+  ctx.restore();
 }
 
 // ── State ─────────────────────────────────────────────────────────────────────
-let celebrations = [];
-let taps = 0;
-let lastTime = performance.now();
+let cars=[], sparks=[], floats=[], score=0, hiScore=0, lastTime=performance.now();
 
-function spawnCelebration(x, y) {
-  const char = CHARS[charIdx % CHARS.length];
-  charIdx++;
-  celebrations.push(new Celebration(x, y, char));
-  playCheer(charIdx);
-  taps++;
-  if(taps > 0) prompt.style.display = 'none';
+function init() {
+  cars=[];sparks=[];floats=[];score=0;
+  for(let i=0;i<NUM_CARS;i++) cars.push(new GameCar(charCursor++, true));
 }
 
-// ── Touch / click ─────────────────────────────────────────────────────────────
-canvas.addEventListener('touchstart', e=>{
-  e.preventDefault();
-  for(const t of e.changedTouches) spawnCelebration(t.clientX, t.clientY);
-}, {passive:false});
+function tapCar(tx,ty) {
+  // check in reverse so top-rendered car wins
+  for(let i=cars.length-1;i>=0;i--){
+    const c=cars[i];
+    if(c.dying||c.spawning) continue;
+    if(c.hit(tx,ty)){
+      score++;
+      hiScore=Math.max(hiScore,score);
+      playPop();
+      // burst
+      for(let j=0;j<38;j++) sparks.push(new Spark(c.x,c.y,c.char.color));
+      // floating texts
+      floats.push(new FloatText(c.x,c.y-HL()*.5,'+1','#FFD700'));
+      floats.push(new NameText(c.x,c.y-HL()*1.5,c.char.name,c.char.color));
+      const phrase=c.char.phrases[Math.floor(Math.random()*c.char.phrases.length)];
+      floats.push(new NameText(W/2,H*.18,phrase,c.char.color));
+      // respawn this car as next character
+      c.dying=true; c.dyingT=0;
+      const nextIdx=charCursor++%CHARS.length;
+      setTimeout(()=>{
+        const idx=cars.indexOf(c);
+        if(idx>=0) cars[idx]=new GameCar(nextIdx,false);
+      },220);
+      return true;
+    }
+  }
+  return false;
+}
 
-canvas.addEventListener('mousedown', e=>{
-  spawnCelebration(e.clientX, e.clientY);
-});
+canvas.addEventListener('touchstart',e=>{e.preventDefault();for(const t of e.changedTouches)tapCar(t.clientX,t.clientY);},{passive:false});
+canvas.addEventListener('mousedown',e=>tapCar(e.clientX,e.clientY));
 
-// ── Game loop ─────────────────────────────────────────────────────────────────
-function loop(now) {
-  const dt = Math.min(now - lastTime, 40);
-  lastTime = now;
+// ── HUD ───────────────────────────────────────────────────────────────────────
+function drawHUD() {
+  const fs=Math.min(W,H)*.07;
+  // score panel
+  ctx.save();
+  const pw=W*.38,ph=fs*1.6,px=(W-pw)/2,py=12;
+  ctx.fillStyle='rgba(0,0,0,.45)';
+  ctx.beginPath();ctx.roundRect(px,py,pw,ph,ph/2);ctx.fill();
 
-  drawBackground();
+  ctx.font=`bold ${fs}px 'Arial Black',Arial`;
+  ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillStyle='#FFD700';
+  ctx.fillText(`⭐ ${score}`,W/2,py+ph/2);
 
-  celebrations.forEach(c=>c.update(dt));
-  celebrations = celebrations.filter(c=>!c.done());
-  celebrations.forEach(c=>c.draw(ctx));
-
-  // Tap counter (top)
-  if(taps > 0){
-    ctx.save();
-    ctx.font=`bold ${Math.round(W*0.06)}px Arial`;
-    ctx.textAlign='left';
-    ctx.strokeStyle='rgba(0,0,0,0.7)'; ctx.lineWidth=5;
-    ctx.strokeText(`⭐ ${taps}`, 16, 48);
-    ctx.fillStyle='#FFD700'; ctx.fillText(`⭐ ${taps}`, 16, 48);
-    ctx.restore();
+  // hi-score
+  if(hiScore>0){
+    const hfs=fs*.48;
+    ctx.font=`bold ${hfs}px 'Arial Black',Arial`;
+    ctx.fillStyle='rgba(255,255,255,.75)';
+    ctx.fillText(`MEJOR: ${hiScore}`,W/2,py+ph+hfs*.7);
   }
 
+  // "toca los autos" hint at start
+  if(score===0){
+    const hfs=Math.min(W,H)*.045;
+    ctx.font=`bold ${hfs}px 'Arial Black',Arial`;
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.strokeStyle='rgba(0,0,0,.7)';ctx.lineWidth=4;
+    ctx.strokeText('¡Toca los autos! 🏎️',W/2,H*.88);
+    ctx.fillStyle='rgba(255,255,255,.95)';
+    ctx.fillText('¡Toca los autos! 🏎️',W/2,H*.88);
+  }
+  ctx.restore();
+}
+
+// ── Loop ─────────────────────────────────────────────────────────────────────
+function loop(now){
+  const dt=Math.min(now-lastTime,40);lastTime=now;
+  drawBg();
+  cars.forEach(c=>c.update(dt));
+  cars.forEach(c=>c.draw(ctx));
+  sparks.forEach(s=>s.update());sparks=sparks.filter(s=>!s.dead());sparks.forEach(s=>s.draw(ctx));
+  floats.forEach(f=>f.update());floats=floats.filter(f=>!f.dead());floats.forEach(f=>f.draw(ctx));
+  drawHUD();
   requestAnimationFrame(loop);
 }
+
+init();
 requestAnimationFrame(loop);
 </script>
 </body>
