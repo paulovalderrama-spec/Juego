@@ -3,385 +3,586 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-  <title>Pong Mobile</title>
+  <title>Cars - ¡Toca la pantalla!</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-
     body {
-      background: #0a0a0a;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      height: 100dvh;
+      background: #1a90d0;
       overflow: hidden;
-      font-family: 'Courier New', monospace;
       touch-action: none;
+      font-family: 'Arial Rounded MT Bold', 'Arial Black', Arial, sans-serif;
     }
-
-    #score {
-      color: #fff;
-      font-size: clamp(24px, 6vw, 48px);
-      letter-spacing: 0.3em;
-      margin-bottom: 12px;
-      user-select: none;
-    }
-
-    canvas {
-      display: block;
-      border: 2px solid #333;
-      border-radius: 4px;
-    }
-
-    #message {
-      color: #aaa;
-      font-size: clamp(12px, 3vw, 16px);
-      margin-top: 12px;
-      letter-spacing: 0.1em;
-      user-select: none;
-      min-height: 1.4em;
-      text-align: center;
-    }
-
-    #overlay {
+    canvas { display: block; width: 100vw; height: 100dvh; }
+    #prompt {
       position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,0.85);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 20px;
-      color: #fff;
-    }
-
-    #overlay h1 {
-      font-size: clamp(32px, 10vw, 64px);
-      letter-spacing: 0.2em;
-    }
-
-    #overlay p {
-      color: #aaa;
-      font-size: clamp(14px, 4vw, 20px);
+      bottom: 36px;
+      width: 100%;
       text-align: center;
-      padding: 0 20px;
+      color: #fff;
+      font-size: clamp(18px, 5vw, 28px);
+      font-weight: 900;
+      text-shadow: 0 3px 10px rgba(0,0,0,0.6), 0 0 20px rgba(255,200,0,0.5);
+      pointer-events: none;
+      letter-spacing: 0.05em;
+      animation: bounce 1.4s ease-in-out infinite;
     }
-
-    #startBtn {
-      background: #fff;
-      color: #000;
-      border: none;
-      padding: 14px 40px;
-      font-size: clamp(16px, 4vw, 22px);
-      font-family: 'Courier New', monospace;
-      font-weight: bold;
-      letter-spacing: 0.15em;
-      cursor: pointer;
-      border-radius: 4px;
-      margin-top: 10px;
+    @keyframes bounce {
+      0%,100% { transform: translateY(0) scale(1); }
+      50% { transform: translateY(-6px) scale(1.04); }
     }
-
-    #startBtn:active { transform: scale(0.96); }
-
-    .hidden { display: none !important; }
   </style>
 </head>
 <body>
-
-<div id="score">
-  <span id="playerScore">0</span> : <span id="aiScore">0</span>
-</div>
-<canvas id="canvas"></canvas>
-<div id="message">Desliza para mover tu paleta</div>
-
-<div id="overlay">
-  <h1>PONG</h1>
-  <p>Desliza en la parte inferior de la pantalla para mover tu paleta</p>
-  <button id="startBtn">JUGAR</button>
-</div>
-
+<canvas id="c"></canvas>
+<div id="prompt">¡Toca la pantalla! 🏎️</div>
 <script>
-  const canvas = document.getElementById('canvas');
-  const ctx = canvas.getContext('2d');
-  const overlay = document.getElementById('overlay');
-  const startBtn = document.getElementById('startBtn');
-  const playerScoreEl = document.getElementById('playerScore');
-  const aiScoreEl = document.getElementById('aiScore');
-  const messageEl = document.getElementById('message');
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const prompt = document.getElementById('prompt');
+let W, H;
 
-  // Canvas size
-  const MAX_W = 420;
-  const MAX_H = 680;
-  let W, H;
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
 
-  function resize() {
-    const vw = window.innerWidth;
-    const vh = window.innerHeight - 80; // space for score + message
-    const ratio = MAX_H / MAX_W;
-    if (vw * ratio <= vh) {
-      W = Math.min(vw - 16, MAX_W);
+// ── Audio ─────────────────────────────────────────────────────────────────────
+const AC = window.AudioContext || window.webkitAudioContext;
+let ac;
+function playCheer(charIdx) {
+  try {
+    if (!ac) ac = new AC();
+    // Short happy chord
+    const notes = [[523,0],[659,0.08],[784,0.16],[1047,0.24]];
+    notes.forEach(([f, t]) => {
+      const osc = ac.createOscillator();
+      const gain = ac.createGain();
+      osc.connect(gain); gain.connect(ac.destination);
+      osc.frequency.value = f;
+      osc.type = 'sine';
+      gain.gain.setValueAtTime(0, ac.currentTime + t);
+      gain.gain.linearRampToValueAtTime(0.18, ac.currentTime + t + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + t + 0.35);
+      osc.start(ac.currentTime + t);
+      osc.stop(ac.currentTime + t + 0.4);
+    });
+  } catch(e) {}
+}
+
+// ── Characters ────────────────────────────────────────────────────────────────
+const CHARS = [
+  { name: 'Rayo McQueen', phrases: ['¡Ka-Chow! ⚡', '¡Soy el número 1! 🏆', '¡Velocidad! 🔥'], draw: drawMcQueen,  color: '#CC0000', glow: '#FF6600' },
+  { name: 'Mater',        phrases: ['¡Tú eres mi mejor amigo! 💛', '¡Bueno eso estuvo!', '¡Yeehaw! 🤠'],         draw: drawMater,    color: '#8B5E1A', glow: '#D4A017' },
+  { name: 'Sally',        phrases: ['¡Qué emocionante! 💙', '¡Fantástico! ✨', '¡Bravo! 💙'],                    draw: drawSally,    color: '#1E90FF', glow: '#87CEEB' },
+  { name: 'Doc Hudson',   phrases: ['¡Bien hecho, campeón! ⭐', '¡Excelente! 🏅', '¡Así se hace! 🎖️'],         draw: drawDoc,      color: '#0D47A1', glow: '#42A5F5' },
+  { name: 'Ramone',       phrases: ['¡Eso es arte, ese! 💜', '¡Ay, caramba! 🎨', '¡Pintón! 💜'],                draw: drawRamone,   color: '#7B1FA2', glow: '#CE93D8' },
+  { name: 'Chick Hicks',  phrases: ['¡Woohoo! 💚', '¡Genial! 🎉', '¡Sí, sí, sí! 🟢'],                         draw: drawChick,    color: '#1B5E20', glow: '#66BB6A' },
+];
+let charIdx = 0;
+
+// ── Car drawing helpers ────────────────────────────────────────────────────────
+function wheel(ctx, x, y, r, hubColor) {
+  ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2);
+  ctx.fillStyle='#1a1a1a'; ctx.fill();
+  ctx.beginPath(); ctx.arc(x,y,r*0.55,0,Math.PI*2);
+  ctx.fillStyle='#999'; ctx.fill();
+  ctx.beginPath(); ctx.arc(x,y,r*0.3,0,Math.PI*2);
+  ctx.fillStyle=hubColor||'#ccc'; ctx.fill();
+}
+
+function eye(ctx, x, y, rx, ry, irisColor, squint) {
+  ctx.save();
+  ctx.beginPath(); ctx.ellipse(x,y,rx,ry,0,0,Math.PI*2);
+  ctx.fillStyle='#fff'; ctx.fill();
+  ctx.beginPath(); ctx.ellipse(x,y,rx*0.56,ry*0.56,0,0,Math.PI*2);
+  ctx.fillStyle=irisColor||'#3399ff'; ctx.fill();
+  ctx.beginPath(); ctx.arc(x,y,rx*0.28,0,Math.PI*2);
+  ctx.fillStyle='#111'; ctx.fill();
+  if(squint){
+    ctx.beginPath(); ctx.ellipse(x,y-ry*0.3,rx,ry*0.55,0,Math.PI,Math.PI*2);
+    ctx.fillStyle='rgba(0,0,0,0.35)'; ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawMcQueen(ctx, cx, cy, sc, t) {
+  ctx.save(); ctx.translate(cx, cy + Math.sin(t*0.006)*5*sc); ctx.scale(sc,sc);
+  // shadow
+  ctx.beginPath(); ctx.ellipse(0,40,60,9,0,0,Math.PI*2);
+  ctx.fillStyle='rgba(0,0,0,0.22)'; ctx.fill();
+  // spoiler
+  ctx.beginPath(); ctx.moveTo(52,-18); ctx.lineTo(62,-32); ctx.lineTo(62,-18);
+  ctx.fillStyle='#AA0000'; ctx.fill();
+  // body
+  ctx.beginPath();
+  ctx.moveTo(-62,18); ctx.bezierCurveTo(-65,-2,-48,-12,-22,-22);
+  ctx.lineTo(18,-30); ctx.bezierCurveTo(38,-30,52,-16,58,-2);
+  ctx.lineTo(62,18); ctx.closePath();
+  ctx.fillStyle='#DD1111'; ctx.fill();
+  ctx.strokeStyle='#990000'; ctx.lineWidth=2; ctx.stroke();
+  // highlight
+  ctx.beginPath(); ctx.moveTo(-55,0); ctx.bezierCurveTo(-30,-20,20,-28,52,-8);
+  ctx.strokeStyle='rgba(255,120,120,0.5)'; ctx.lineWidth=4; ctx.stroke();
+  // windshield
+  ctx.beginPath();
+  ctx.moveTo(-2,-29); ctx.lineTo(34,-29); ctx.lineTo(44,-10); ctx.lineTo(-2,-10);
+  ctx.closePath(); ctx.fillStyle='rgba(120,200,255,0.85)'; ctx.fill();
+  ctx.strokeStyle='#333'; ctx.lineWidth=1.5; ctx.stroke();
+  // eyes
+  eye(ctx, 8,-20, 10,8,'#4488FF',true);
+  eye(ctx,26,-20, 10,8,'#4488FF',true);
+  // lightning bolt
+  ctx.beginPath();
+  ctx.moveTo(-38,-4); ctx.lineTo(-26,-18); ctx.lineTo(-20,-9);
+  ctx.lineTo(-10,-22); ctx.lineTo(-14,-9); ctx.lineTo(-4,-9);
+  ctx.lineTo(-20,8); ctx.lineTo(-24,-2); ctx.closePath();
+  ctx.fillStyle='#FFD700'; ctx.fill(); ctx.strokeStyle='#FF8C00'; ctx.lineWidth=1; ctx.stroke();
+  // #95
+  ctx.fillStyle='#fff'; ctx.font='bold 13px Arial'; ctx.textAlign='center';
+  ctx.fillText('95',-46,10);
+  // grille
+  ctx.beginPath(); ctx.moveTo(-62,2); ctx.lineTo(-62,14); ctx.lineTo(-50,14); ctx.lineTo(-50,2);
+  ctx.fillStyle='#888'; ctx.fill(); ctx.strokeStyle='#555'; ctx.lineWidth=1; ctx.stroke();
+  wheel(ctx,-40,30,16,'#CC0000'); wheel(ctx,38,30,16,'#CC0000');
+  ctx.restore();
+}
+
+function drawMater(ctx, cx, cy, sc, t) {
+  ctx.save(); ctx.translate(cx, cy + Math.sin(t*0.006+1)*5*sc); ctx.scale(sc,sc);
+  ctx.beginPath(); ctx.ellipse(0,45,62,9,0,0,Math.PI*2);
+  ctx.fillStyle='rgba(0,0,0,0.22)'; ctx.fill();
+  // tow hook arm
+  ctx.beginPath(); ctx.moveTo(55,0); ctx.lineTo(70,-20); ctx.lineTo(72,-10);
+  ctx.strokeStyle='#666'; ctx.lineWidth=5; ctx.stroke();
+  // body (boxy truck)
+  ctx.beginPath(); ctx.roundRect(-60,-10,120,38,6);
+  ctx.fillStyle='#8B5A1A'; ctx.fill(); ctx.strokeStyle='#5a3a0a'; ctx.lineWidth=2; ctx.stroke();
+  // cab
+  ctx.beginPath(); ctx.roundRect(-55,-35,70,28,8);
+  ctx.fillStyle='#9B6A2A'; ctx.fill(); ctx.strokeStyle='#5a3a0a'; ctx.lineWidth=2; ctx.stroke();
+  // rust patches
+  ctx.fillStyle='rgba(160,80,0,0.4)';
+  ctx.beginPath(); ctx.ellipse(-30,5,12,6,0.3,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(20,15,9,5,-0.2,0,Math.PI*2); ctx.fill();
+  // windshield
+  ctx.beginPath(); ctx.roundRect(-48,-32,58,20,5);
+  ctx.fillStyle='rgba(120,200,255,0.8)'; ctx.fill(); ctx.strokeStyle='#333'; ctx.lineWidth=1.5; ctx.stroke();
+  // eyes
+  eye(ctx,-22,-24,10,8,'#55AA55',false);
+  eye(ctx,8,-24,10,8,'#55AA55',false);
+  // buck teeth
+  ctx.fillStyle='#fffde0';
+  ctx.beginPath(); ctx.roundRect(-14,-6,10,14,2); ctx.fill();
+  ctx.beginPath(); ctx.roundRect(-1,-6,10,14,2); ctx.fill();
+  ctx.strokeStyle='#ccc'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(-4,-6); ctx.lineTo(-4,8); ctx.stroke();
+  // dents
+  ctx.strokeStyle='rgba(80,40,0,0.5)'; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.arc(35,10,8,0.5,2.5); ctx.stroke();
+  ctx.beginPath(); ctx.arc(-38,8,6,0.5,2.5); ctx.stroke();
+  wheel(ctx,-38,38,17,'#8B5A1A'); wheel(ctx,38,38,17,'#8B5A1A');
+  ctx.restore();
+}
+
+function drawSally(ctx, cx, cy, sc, t) {
+  ctx.save(); ctx.translate(cx, cy + Math.sin(t*0.006+2)*5*sc); ctx.scale(sc,sc);
+  ctx.beginPath(); ctx.ellipse(0,38,58,8,0,0,Math.PI*2);
+  ctx.fillStyle='rgba(0,0,0,0.2)'; ctx.fill();
+  // body - sleek Porsche shape
+  ctx.beginPath();
+  ctx.moveTo(-60,15); ctx.bezierCurveTo(-62,-5,-40,-18,-10,-24);
+  ctx.lineTo(20,-26); ctx.bezierCurveTo(42,-26,56,-12,60,-2);
+  ctx.lineTo(60,15); ctx.closePath();
+  ctx.fillStyle='#29B6F6'; ctx.fill(); ctx.strokeStyle='#0277BD'; ctx.lineWidth=2; ctx.stroke();
+  // highlight
+  ctx.beginPath(); ctx.moveTo(-48,-2); ctx.bezierCurveTo(-20,-20,10,-24,50,-10);
+  ctx.strokeStyle='rgba(180,240,255,0.6)'; ctx.lineWidth=4; ctx.stroke();
+  // windshield
+  ctx.beginPath();
+  ctx.moveTo(-8,-23); ctx.lineTo(26,-25); ctx.lineTo(40,-10); ctx.lineTo(-8,-10);
+  ctx.closePath(); ctx.fillStyle='rgba(135,220,255,0.8)'; ctx.fill();
+  ctx.strokeStyle='#0277BD'; ctx.lineWidth=1.5; ctx.stroke();
+  // eyes with lashes
+  eye(ctx,6,-18,10,8,'#3399FF',false);
+  eye(ctx,22,-18,10,8,'#3399FF',false);
+  // lashes
+  ctx.strokeStyle='#222'; ctx.lineWidth=1.5;
+  [[-2,-24],[1,-25],[4,-25],[7,-24]].forEach(([lx,ly])=>{ ctx.beginPath(); ctx.moveTo(lx,ly); ctx.lineTo(lx-1,ly-3); ctx.stroke(); });
+  [[18,-24],[21,-25],[24,-25],[27,-24]].forEach(([lx,ly])=>{ ctx.beginPath(); ctx.moveTo(lx,ly); ctx.lineTo(lx-1,ly-3); ctx.stroke(); });
+  // grille + headlights
+  ctx.beginPath(); ctx.roundRect(-58,2,14,10,3); ctx.fillStyle='#FFD700'; ctx.fill();
+  ctx.beginPath(); ctx.roundRect(-58,6,8,6,2); ctx.fillStyle='#333'; ctx.fill();
+  wheel(ctx,-38,28,15,'#29B6F6'); wheel(ctx,36,28,15,'#29B6F6');
+  ctx.restore();
+}
+
+function drawDoc(ctx, cx, cy, sc, t) {
+  ctx.save(); ctx.translate(cx, cy + Math.sin(t*0.006+3)*5*sc); ctx.scale(sc,sc);
+  ctx.beginPath(); ctx.ellipse(0,40,60,9,0,0,Math.PI*2);
+  ctx.fillStyle='rgba(0,0,0,0.22)'; ctx.fill();
+  // fins at back
+  ctx.beginPath(); ctx.moveTo(52,-5); ctx.lineTo(62,-22); ctx.lineTo(62,5); ctx.closePath();
+  ctx.fillStyle='#0D47A1'; ctx.fill();
+  ctx.beginPath(); ctx.moveTo(52,5); ctx.lineTo(62,22); ctx.lineTo(62,10); ctx.closePath();
+  ctx.fillStyle='#0D47A1'; ctx.fill();
+  // body - 1951 Hudson style (long, low, boxy)
+  ctx.beginPath();
+  ctx.moveTo(-62,18); ctx.bezierCurveTo(-64,0,-50,-10,-20,-18);
+  ctx.lineTo(18,-20); ctx.bezierCurveTo(40,-20,55,-10,60,0);
+  ctx.lineTo(62,18); ctx.closePath();
+  ctx.fillStyle='#1565C0'; ctx.fill(); ctx.strokeStyle='#0D47A1'; ctx.lineWidth=2; ctx.stroke();
+  // body stripe
+  ctx.beginPath(); ctx.moveTo(-60,4); ctx.lineTo(60,4); ctx.lineTo(60,10); ctx.lineTo(-60,10); ctx.closePath();
+  ctx.fillStyle='rgba(255,255,255,0.12)'; ctx.fill();
+  // windshield
+  ctx.beginPath();
+  ctx.moveTo(-10,-17); ctx.lineTo(22,-19); ctx.lineTo(34,-8); ctx.lineTo(-10,-8);
+  ctx.closePath(); ctx.fillStyle='rgba(135,200,255,0.75)'; ctx.fill();
+  ctx.strokeStyle='#0a3070'; ctx.lineWidth=1.5; ctx.stroke();
+  // stern eyes (squinting)
+  eye(ctx,2,-13,10,7,'#2244AA',true);
+  eye(ctx,20,-13,10,7,'#2244AA',true);
+  // eyebrows - stern
+  ctx.strokeStyle='#0a2060'; ctx.lineWidth=3;
+  ctx.beginPath(); ctx.moveTo(-5,-17); ctx.lineTo(9,-20); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(14,-18); ctx.lineTo(28,-20); ctx.stroke();
+  // "51" number
+  ctx.fillStyle='rgba(255,255,255,0.9)'; ctx.font='bold 12px Arial'; ctx.textAlign='center';
+  ctx.fillText('51',-38,12);
+  // grille (horizontal bars)
+  for(let i=0;i<3;i++){
+    ctx.beginPath(); ctx.moveTo(-60,-4+i*5); ctx.lineTo(-50,-4+i*5);
+    ctx.strokeStyle='#aaa'; ctx.lineWidth=2; ctx.stroke();
+  }
+  wheel(ctx,-40,30,16,'#1565C0'); wheel(ctx,38,30,16,'#1565C0');
+  ctx.restore();
+}
+
+function drawRamone(ctx, cx, cy, sc, t) {
+  ctx.save(); ctx.translate(cx, cy + Math.sin(t*0.006+4)*5*sc); ctx.scale(sc,sc);
+  ctx.beginPath(); ctx.ellipse(0,36,65,8,0,0,Math.PI*2);
+  ctx.fillStyle='rgba(0,0,0,0.22)'; ctx.fill();
+  // lowrider - very low profile
+  ctx.beginPath();
+  ctx.moveTo(-65,12); ctx.bezierCurveTo(-68,-6,-45,-15,-5,-19);
+  ctx.lineTo(20,-19); ctx.bezierCurveTo(48,-19,62,-8,66,-2);
+  ctx.lineTo(66,12); ctx.closePath();
+  ctx.fillStyle='#8E24AA'; ctx.fill(); ctx.strokeStyle='#4A148C'; ctx.lineWidth=2; ctx.stroke();
+  // flame details
+  ctx.save();
+  const flameGrad = ctx.createLinearGradient(-65,0,0,0);
+  flameGrad.addColorStop(0,'rgba(255,100,0,0.8)');
+  flameGrad.addColorStop(1,'rgba(255,200,0,0)');
+  ctx.beginPath();
+  ctx.moveTo(-65,5); ctx.bezierCurveTo(-55,-8,-45,2,-35,-10);
+  ctx.bezierCurveTo(-25,2,-18,-6,-10,2); ctx.lineTo(-10,12); ctx.lineTo(-65,12);
+  ctx.fillStyle=flameGrad; ctx.fill();
+  ctx.restore();
+  // windshield
+  ctx.beginPath();
+  ctx.moveTo(-5,-18); ctx.lineTo(28,-18); ctx.lineTo(40,-8); ctx.lineTo(-5,-8);
+  ctx.closePath(); ctx.fillStyle='rgba(135,200,255,0.8)'; ctx.fill();
+  ctx.strokeStyle='#4A148C'; ctx.lineWidth=1.5; ctx.stroke();
+  // eyes
+  eye(ctx,6,-14,10,7,'#AA44CC',false);
+  eye(ctx,24,-14,10,7,'#AA44CC',false);
+  // chrome details
+  ctx.strokeStyle='rgba(200,200,255,0.7)'; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.moveTo(-40,0); ctx.lineTo(-40,12); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(-48,0); ctx.lineTo(-48,12); ctx.stroke();
+  // whitewall wheels
+  wheel(ctx,-42,26,16,'#8E24AA'); wheel(ctx,42,26,16,'#8E24AA');
+  // whitewall ring
+  [[-42,26],[42,26]].forEach(([wx,wy])=>{
+    ctx.beginPath(); ctx.arc(wx,wy,11,0,Math.PI*2);
+    ctx.strokeStyle='#fff'; ctx.lineWidth=2; ctx.stroke();
+  });
+  ctx.restore();
+}
+
+function drawChick(ctx, cx, cy, sc, t) {
+  ctx.save(); ctx.translate(cx, cy + Math.sin(t*0.006+5)*5*sc); ctx.scale(sc,sc);
+  ctx.beginPath(); ctx.ellipse(0,40,60,9,0,0,Math.PI*2);
+  ctx.fillStyle='rgba(0,0,0,0.22)'; ctx.fill();
+  // rear spoiler
+  ctx.beginPath(); ctx.moveTo(48,-18); ctx.lineTo(60,-28); ctx.lineTo(60,-18); ctx.lineTo(48,-10);
+  ctx.fillStyle='#1B5E20'; ctx.fill();
+  // body
+  ctx.beginPath();
+  ctx.moveTo(-60,16); ctx.bezierCurveTo(-62,-4,-46,-14,-18,-22);
+  ctx.lineTo(16,-28); ctx.bezierCurveTo(36,-28,50,-14,56,-4);
+  ctx.lineTo(58,16); ctx.closePath();
+  ctx.fillStyle='#2E7D32'; ctx.fill(); ctx.strokeStyle='#1B5E20'; ctx.lineWidth=2; ctx.stroke();
+  // side vent details
+  ctx.strokeStyle='rgba(0,0,0,0.4)'; ctx.lineWidth=2;
+  for(let i=0;i<3;i++){ ctx.beginPath(); ctx.moveTo(-50+i*12,0); ctx.lineTo(-46+i*12,14); ctx.stroke(); }
+  // windshield
+  ctx.beginPath();
+  ctx.moveTo(-4,-27); ctx.lineTo(30,-27); ctx.lineTo(42,-10); ctx.lineTo(-4,-10);
+  ctx.closePath(); ctx.fillStyle='rgba(120,200,100,0.7)'; ctx.fill();
+  ctx.strokeStyle='#1B5E20'; ctx.lineWidth=1.5; ctx.stroke();
+  // menacing eyes
+  eye(ctx,8,-20,10,7,'#00CC44',true);
+  eye(ctx,26,-20,10,7,'#00CC44',true);
+  // menacing eyebrows
+  ctx.strokeStyle='#000'; ctx.lineWidth=3;
+  ctx.beginPath(); ctx.moveTo(2,-25); ctx.lineTo(15,-22); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(20,-22); ctx.lineTo(33,-25); ctx.stroke();
+  // smirk
+  ctx.beginPath(); ctx.moveTo(-40,5); ctx.bezierCurveTo(-30,3,-20,10,-10,6);
+  ctx.strokeStyle='#111'; ctx.lineWidth=2; ctx.stroke();
+  // #86
+  ctx.fillStyle='#fff'; ctx.font='bold 13px Arial'; ctx.textAlign='center';
+  ctx.fillText('86',-44,10);
+  wheel(ctx,-38,28,16,'#2E7D32'); wheel(ctx,36,28,16,'#2E7D32');
+  ctx.restore();
+}
+
+// ── Background ────────────────────────────────────────────────────────────────
+function drawBackground() {
+  // Sky gradient
+  const sky = ctx.createLinearGradient(0,0,0,H*0.65);
+  sky.addColorStop(0,'#1a90d0'); sky.addColorStop(1,'#87CEEB');
+  ctx.fillStyle=sky; ctx.fillRect(0,0,W,H);
+
+  // Sun
+  const sunX=W*0.82, sunY=H*0.12, sunR=H*0.07;
+  const sunGlow=ctx.createRadialGradient(sunX,sunY,0,sunX,sunY,sunR*2.5);
+  sunGlow.addColorStop(0,'rgba(255,230,80,0.6)'); sunGlow.addColorStop(1,'rgba(255,200,0,0)');
+  ctx.beginPath(); ctx.arc(sunX,sunY,sunR*2.5,0,Math.PI*2);
+  ctx.fillStyle=sunGlow; ctx.fill();
+  ctx.beginPath(); ctx.arc(sunX,sunY,sunR,0,Math.PI*2);
+  ctx.fillStyle='#FFD700'; ctx.fill();
+
+  // Radiator Springs rock formations
+  const rocks=[
+    {x:W*0.05,w:W*0.12,h:H*0.28,color:'#c45e2a'},
+    {x:W*0.14,w:W*0.08,h:H*0.38,color:'#d46a32'},
+    {x:W*0.72,w:W*0.14,h:H*0.32,color:'#c45e2a'},
+    {x:W*0.84,w:W*0.12,h:H*0.22,color:'#d46a32'},
+  ];
+  rocks.forEach(r=>{
+    const gy=H*0.65-r.h;
+    ctx.beginPath();
+    ctx.moveTo(r.x,H*0.65);
+    ctx.lineTo(r.x,gy+r.h*0.15);
+    ctx.bezierCurveTo(r.x+r.w*0.1,gy,r.x+r.w*0.4,gy*0.98,r.x+r.w*0.5,gy);
+    ctx.bezierCurveTo(r.x+r.w*0.6,gy*0.98,r.x+r.w*0.9,gy+r.h*0.1,r.x+r.w,gy+r.h*0.2);
+    ctx.lineTo(r.x+r.w,H*0.65);
+    ctx.fillStyle=r.color; ctx.fill();
+    // rock shadow side
+    ctx.beginPath();
+    ctx.moveTo(r.x+r.w*0.5,gy); ctx.lineTo(r.x+r.w,gy+r.h*0.2); ctx.lineTo(r.x+r.w,H*0.65);
+    ctx.lineTo(r.x+r.w*0.5,H*0.65); ctx.closePath();
+    ctx.fillStyle='rgba(0,0,0,0.18)'; ctx.fill();
+  });
+
+  // Ground / desert
+  const ground=ctx.createLinearGradient(0,H*0.62,0,H*0.72);
+  ground.addColorStop(0,'#d4863c'); ground.addColorStop(1,'#b8692a');
+  ctx.fillStyle=ground; ctx.fillRect(0,H*0.62,W,H*0.12);
+
+  // Road
+  const roadTop=H*0.70, roadH=H*0.30;
+  const road=ctx.createLinearGradient(0,roadTop,0,H);
+  road.addColorStop(0,'#444'); road.addColorStop(1,'#333');
+  ctx.fillStyle=road; ctx.fillRect(0,roadTop,W,roadH);
+
+  // Road edge lines
+  ctx.fillStyle='#FFD700';
+  ctx.fillRect(0,roadTop+2,W,4);
+
+  // Center dashed line
+  ctx.setLineDash([W*0.06,W*0.04]);
+  ctx.strokeStyle='#FFD700'; ctx.lineWidth=4;
+  ctx.beginPath(); ctx.moveTo(0,roadTop+roadH*0.5); ctx.lineTo(W,roadTop+roadH*0.5);
+  ctx.stroke(); ctx.setLineDash([]);
+
+  // Route 66 sign
+  const sx=W*0.5-28, sy=H*0.66;
+  ctx.fillStyle='#111'; ctx.beginPath(); ctx.roundRect(sx,sy,56,36,6); ctx.fill();
+  ctx.strokeStyle='#fff'; ctx.lineWidth=2; ctx.stroke();
+  ctx.fillStyle='#fff'; ctx.font='bold 11px Arial'; ctx.textAlign='center';
+  ctx.fillText('RUTA',W*0.5,sy+14);
+  ctx.font='bold 14px Arial'; ctx.fillText('66',W*0.5,sy+30);
+}
+
+// ── Particles ─────────────────────────────────────────────────────────────────
+const COLORS=['#FF5252','#FFD740','#69F0AE','#40C4FF','#EA80FC','#FF6D00','#FFFFFF','#FF80AB'];
+class Particle {
+  constructor(x,y) {
+    this.x=x; this.y=y;
+    this.vx=(Math.random()-0.5)*14;
+    this.vy=-Math.random()*14-6;
+    this.color=COLORS[Math.floor(Math.random()*COLORS.length)];
+    this.size=Math.random()*10+5;
+    this.life=1;
+    this.decay=Math.random()*0.015+0.012;
+    this.isstar=Math.random()<0.4;
+    this.rot=Math.random()*Math.PI;
+    this.rotV=(Math.random()-0.5)*0.2;
+  }
+  update() {
+    this.x+=this.vx; this.y+=this.vy;
+    this.vy+=0.45; this.vx*=0.97;
+    this.life-=this.decay;
+    this.rot+=this.rotV;
+  }
+  draw(ctx) {
+    ctx.save(); ctx.globalAlpha=Math.max(0,this.life);
+    ctx.translate(this.x,this.y); ctx.rotate(this.rot);
+    ctx.fillStyle=this.color;
+    if(this.isstar){
+      // 5-point star
+      ctx.beginPath();
+      for(let i=0;i<5;i++){
+        const a=i*Math.PI*2/5 - Math.PI/2;
+        const ai=a+Math.PI/5;
+        i===0?ctx.moveTo(Math.cos(a)*this.size,Math.sin(a)*this.size)
+             :ctx.lineTo(Math.cos(a)*this.size,Math.sin(a)*this.size);
+        ctx.lineTo(Math.cos(ai)*this.size*0.42,Math.sin(ai)*this.size*0.42);
+      }
+      ctx.closePath();
     } else {
-      W = Math.floor((vh) / ratio);
+      ctx.beginPath(); ctx.roundRect(-this.size/2,-this.size/3,this.size,this.size*0.6,2);
     }
-    H = Math.floor(W * ratio);
-    canvas.width = W;
-    canvas.height = H;
+    ctx.fill(); ctx.restore();
   }
+}
 
-  // Game state
-  const PADDLE_W = () => Math.max(8, W * 0.025);
-  const PADDLE_H = () => H * 0.18;
-  const BALL_R = () => Math.max(6, W * 0.022);
-  const SPEED_INIT = () => W * 0.007;
-  const SPEED_MAX = () => W * 0.018;
-
-  let playerY, aiY, ballX, ballY, ballVX, ballVY;
-  let playerScore, aiScore;
-  let running = false;
-  let lastTime = 0;
-  let aiError = 0; // simulated AI imprecision
-
-  function reset(serveTo = 'player') {
-    ballX = W / 2;
-    ballY = H / 2;
-    const angle = (Math.random() * 0.5 + 0.2) * (Math.random() < 0.5 ? 1 : -1);
-    const speed = SPEED_INIT();
-    ballVY = speed * angle;
-    ballVX = serveTo === 'player' ? -speed : speed;
-    aiError = (Math.random() - 0.5) * PADDLE_H() * 0.4;
+// ── Ring burst ────────────────────────────────────────────────────────────────
+class RingBurst {
+  constructor(x,y,color){ this.x=x; this.y=y; this.r=0; this.life=1; this.color=color||'#FFD700'; }
+  update(){ this.r+=8; this.life-=0.04; }
+  draw(ctx){
+    ctx.save(); ctx.globalAlpha=Math.max(0,this.life);
+    ctx.beginPath(); ctx.arc(this.x,this.y,this.r,0,Math.PI*2);
+    ctx.strokeStyle=this.color; ctx.lineWidth=3*(1-this.r/200); ctx.stroke();
+    ctx.restore();
   }
+}
 
-  function init() {
-    playerY = H / 2 - PADDLE_H() / 2;
-    aiY = H / 2 - PADDLE_H() / 2;
-    playerScore = 0;
-    aiScore = 0;
-    playerScoreEl.textContent = 0;
-    aiScoreEl.textContent = 0;
-    reset('player');
+// ── Celebration ───────────────────────────────────────────────────────────────
+class Celebration {
+  constructor(x, y, char) {
+    this.x = x; this.y = y; this.char = char;
+    this.phrase = char.phrases[Math.floor(Math.random()*char.phrases.length)];
+    this.particles = Array.from({length:40}, ()=>new Particle(x,y));
+    this.rings = [new RingBurst(x,y,char.glow), new RingBurst(x,y,'#ffffff')];
+    this.rings[1].r = 30;
+    this.t = 0; this.life = 1;
+    this.carX = x < W/2 ? -120 : W+120;
+    this.carTargetX = W/2;
+    this.carY = H*0.78;
+    this.carScale = Math.min(W,H)*0.0013;
+    this.arrived = false;
+    this.holdTimer = 0;
+    this.leaving = false;
+    this.carVX = (this.carTargetX - this.carX) * 0.06;
+    this.textAlpha = 0;
+    this.nameAlpha = 0;
   }
-
-  // Touch control
-  let touchY = null;
-  let lastTouchY = null;
-
-  canvas.addEventListener('touchstart', e => {
-    e.preventDefault();
-    touchY = e.touches[0].clientY;
-    lastTouchY = touchY;
-  }, { passive: false });
-
-  canvas.addEventListener('touchmove', e => {
-    e.preventDefault();
-    const t = e.touches[0];
-    const dy = t.clientY - lastTouchY;
-    lastTouchY = t.clientY;
-    touchY = t.clientY;
-    const ph = PADDLE_H();
-    playerY = Math.max(0, Math.min(H - ph, playerY + dy));
-  }, { passive: false });
-
-  canvas.addEventListener('touchend', e => {
-    e.preventDefault();
-    touchY = null;
-    lastTouchY = null;
-  }, { passive: false });
-
-  // Mouse fallback for desktop testing
-  let mouseDown = false;
-  let lastMouseY = null;
-  canvas.addEventListener('mousedown', e => { mouseDown = true; lastMouseY = e.clientY; });
-  window.addEventListener('mouseup', () => { mouseDown = false; lastMouseY = null; });
-  canvas.addEventListener('mousemove', e => {
-    if (!mouseDown) return;
-    const dy = e.clientY - lastMouseY;
-    lastMouseY = e.clientY;
-    const ph = PADDLE_H();
-    playerY = Math.max(0, Math.min(H - ph, playerY + dy));
-  });
-
-  function updateAI(dt) {
-    const ph = PADDLE_H();
-    const aiCenter = aiY + ph / 2;
-    const target = ballY + aiError;
-    const speed = W * 0.011 * dt / 16;
-    if (aiCenter < target - 4) aiY = Math.min(H - ph, aiY + speed);
-    else if (aiCenter > target + 4) aiY = Math.max(0, aiY - speed);
-    // Occasionally update imprecision
-    if (Math.random() < 0.01) aiError = (Math.random() - 0.5) * ph * 0.5;
-  }
-
-  function update(dt) {
-    const pw = PADDLE_W();
-    const ph = PADDLE_H();
-    const br = BALL_R();
-    const speedMax = SPEED_MAX();
-
-    ballX += ballVX * dt / 16;
-    ballY += ballVY * dt / 16;
-
-    // Wall bounce top/bottom
-    if (ballY - br < 0) { ballY = br; ballVY = Math.abs(ballVY); }
-    if (ballY + br > H) { ballY = H - br; ballVY = -Math.abs(ballVY); }
-
-    // Player paddle (left)
-    if (
-      ballX - br < pw + 2 &&
-      ballX - br > 0 &&
-      ballY > playerY &&
-      ballY < playerY + ph
-    ) {
-      ballX = pw + 2 + br;
-      const hitPos = (ballY - playerY) / ph - 0.5; // -0.5 to 0.5
-      const speed = Math.min(Math.sqrt(ballVX * ballVX + ballVY * ballVY) * 1.05, speedMax);
-      const angle = hitPos * 1.2;
-      ballVX = Math.abs(speed / Math.sqrt(1 + angle * angle));
-      ballVY = angle * ballVX;
-      messageEl.textContent = '';
+  update(dt) {
+    this.t += dt;
+    this.particles.forEach(p=>p.update());
+    this.rings.forEach(r=>r.update());
+    // Car drives in
+    if(!this.arrived){
+      this.carX += (this.carTargetX - this.carX) * 0.08;
+      if(Math.abs(this.carX - this.carTargetX) < 2){ this.arrived=true; }
+    } else {
+      this.holdTimer += dt;
+      this.textAlpha = Math.min(1, this.textAlpha+0.06);
+      this.nameAlpha = Math.min(1, this.nameAlpha+0.04);
+      if(this.holdTimer > 1600) this.leaving=true;
     }
-
-    // AI paddle (right)
-    if (
-      ballX + br > W - pw - 2 &&
-      ballX + br < W &&
-      ballY > aiY &&
-      ballY < aiY + ph
-    ) {
-      ballX = W - pw - 2 - br;
-      const hitPos = (ballY - aiY) / ph - 0.5;
-      const speed = Math.min(Math.sqrt(ballVX * ballVX + ballVY * ballVY) * 1.05, speedMax);
-      const angle = hitPos * 1.2;
-      ballVX = -(Math.abs(speed / Math.sqrt(1 + angle * angle)));
-      ballVY = angle * Math.abs(ballVX);
+    if(this.leaving){ this.life -= 0.018; this.carX += this.carX < W/2 ? -6 : 6; }
+  }
+  done() { return this.life <= 0; }
+  draw(ctx) {
+    ctx.save(); ctx.globalAlpha=Math.max(0,this.life);
+    this.particles.forEach(p=>p.draw(ctx));
+    this.rings.forEach(r=>r.draw(ctx));
+    // Car
+    const flip = this.x > W/2;
+    ctx.save();
+    if(flip){ ctx.translate(this.carX*2,0); ctx.scale(-1,1); }
+    this.char.draw(ctx, this.carX, this.carY, this.carScale, this.t);
+    ctx.restore();
+    // Character name
+    if(this.arrived && this.nameAlpha > 0){
+      ctx.globalAlpha = Math.max(0,this.life) * this.nameAlpha;
+      const nameY = this.carY - 90*this.carScale - 10;
+      ctx.font = `bold ${Math.round(W*0.045)}px Arial`;
+      ctx.textAlign='center';
+      ctx.strokeStyle='#000'; ctx.lineWidth=5; ctx.strokeText(this.char.name, this.carX, nameY);
+      ctx.fillStyle=this.char.color; ctx.fillText(this.char.name, this.carX, nameY);
     }
-
-    // Score
-    if (ballX - br < 0) {
-      aiScore++;
-      aiScoreEl.textContent = aiScore;
-      messageEl.textContent = aiScore >= 7 ? '¡La IA ganó! Toca para reiniciar' : '';
-      if (aiScore >= 7) { endGame('ai'); return; }
-      reset('ai');
+    // Phrase
+    if(this.arrived && this.textAlpha > 0){
+      ctx.globalAlpha = Math.max(0,this.life) * this.textAlpha;
+      const py = this.carY - 90*this.carScale - 10 - W*0.055;
+      const fs = Math.round(W*0.06);
+      ctx.font = `bold ${fs}px Arial`;
+      ctx.textAlign='center';
+      ctx.strokeStyle='rgba(0,0,0,0.8)'; ctx.lineWidth=6; ctx.strokeText(this.phrase, W/2, py);
+      ctx.fillStyle='#FFD700'; ctx.fillText(this.phrase, W/2, py);
     }
-    if (ballX + br > W) {
-      playerScore++;
-      playerScoreEl.textContent = playerScore;
-      messageEl.textContent = playerScore >= 7 ? '¡Ganaste! Toca para reiniciar' : '';
-      if (playerScore >= 7) { endGame('player'); return; }
-      reset('player');
-    }
+    ctx.restore();
+  }
+}
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let celebrations = [];
+let taps = 0;
+let lastTime = performance.now();
+
+function spawnCelebration(x, y) {
+  const char = CHARS[charIdx % CHARS.length];
+  charIdx++;
+  celebrations.push(new Celebration(x, y, char));
+  playCheer(charIdx);
+  taps++;
+  if(taps > 0) prompt.style.display = 'none';
+}
+
+// ── Touch / click ─────────────────────────────────────────────────────────────
+canvas.addEventListener('touchstart', e=>{
+  e.preventDefault();
+  for(const t of e.changedTouches) spawnCelebration(t.clientX, t.clientY);
+}, {passive:false});
+
+canvas.addEventListener('mousedown', e=>{
+  spawnCelebration(e.clientX, e.clientY);
+});
+
+// ── Game loop ─────────────────────────────────────────────────────────────────
+function loop(now) {
+  const dt = Math.min(now - lastTime, 40);
+  lastTime = now;
+
+  drawBackground();
+
+  celebrations.forEach(c=>c.update(dt));
+  celebrations = celebrations.filter(c=>!c.done());
+  celebrations.forEach(c=>c.draw(ctx));
+
+  // Tap counter (top)
+  if(taps > 0){
+    ctx.save();
+    ctx.font=`bold ${Math.round(W*0.06)}px Arial`;
+    ctx.textAlign='left';
+    ctx.strokeStyle='rgba(0,0,0,0.7)'; ctx.lineWidth=5;
+    ctx.strokeText(`⭐ ${taps}`, 16, 48);
+    ctx.fillStyle='#FFD700'; ctx.fillText(`⭐ ${taps}`, 16, 48);
+    ctx.restore();
   }
 
-  function draw() {
-    const pw = PADDLE_W();
-    const ph = PADDLE_H();
-    const br = BALL_R();
-
-    ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = '#111';
-    ctx.fillRect(0, 0, W, H);
-
-    // Center line
-    ctx.setLineDash([H * 0.04, H * 0.03]);
-    ctx.strokeStyle = '#333';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(W / 2, 0);
-    ctx.lineTo(W / 2, H);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    // Paddles
-    const pr = 4;
-    ctx.fillStyle = '#fff';
-    roundRect(pw * 0.3, playerY, pw, ph, pr);
-    roundRect(W - pw * 1.3, aiY, pw, ph, pr);
-
-    // Ball
-    ctx.beginPath();
-    ctx.arc(ballX, ballY, br, 0, Math.PI * 2);
-    ctx.fillStyle = '#fff';
-    ctx.fill();
-
-    // Ball glow
-    const grd = ctx.createRadialGradient(ballX, ballY, 0, ballX, ballY, br * 3);
-    grd.addColorStop(0, 'rgba(255,255,255,0.15)');
-    grd.addColorStop(1, 'rgba(255,255,255,0)');
-    ctx.beginPath();
-    ctx.arc(ballX, ballY, br * 3, 0, Math.PI * 2);
-    ctx.fillStyle = grd;
-    ctx.fill();
-  }
-
-  function roundRect(x, y, w, h, r) {
-    ctx.beginPath();
-    ctx.moveTo(x + r, y);
-    ctx.lineTo(x + w - r, y);
-    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-    ctx.lineTo(x + w, y + h - r);
-    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-    ctx.lineTo(x + r, y + h);
-    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-    ctx.lineTo(x, y + r);
-    ctx.quadraticCurveTo(x, y, x + r, y);
-    ctx.closePath();
-    ctx.fill();
-  }
-
-  let gameOver = false;
-
-  function endGame(winner) {
-    running = false;
-    gameOver = true;
-    messageEl.textContent = winner === 'player' ? '¡Ganaste! Toca para reiniciar' : '¡La IA ganó! Toca para reiniciar';
-    canvas.addEventListener('touchstart', restartOnTouch, { once: false });
-    canvas.addEventListener('mousedown', restartOnClick, { once: false });
-  }
-
-  function restartOnTouch(e) {
-    e.preventDefault();
-    doRestart();
-  }
-  function restartOnClick() { doRestart(); }
-
-  function doRestart() {
-    if (!gameOver) return;
-    canvas.removeEventListener('touchstart', restartOnTouch);
-    canvas.removeEventListener('mousedown', restartOnClick);
-    gameOver = false;
-    messageEl.textContent = 'Desliza para mover tu paleta';
-    init();
-    running = true;
-    requestAnimationFrame(loop);
-  }
-
-  function loop(ts) {
-    if (!running) return;
-    const dt = Math.min(ts - (lastTime || ts), 33);
-    lastTime = ts;
-    updateAI(dt);
-    update(dt);
-    draw();
-    if (running) requestAnimationFrame(loop);
-  }
-
-  startBtn.addEventListener('click', () => {
-    overlay.classList.add('hidden');
-    resize();
-    init();
-    running = true;
-    requestAnimationFrame(loop);
-  });
-
-  window.addEventListener('resize', () => {
-    resize();
-    // Reposition paddles proportionally after resize
-    const ph = PADDLE_H();
-    playerY = Math.max(0, Math.min(H - ph, playerY));
-    aiY = Math.max(0, Math.min(H - ph, aiY));
-  });
-
-  resize();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
 </script>
 </body>
 </html>
