@@ -291,6 +291,9 @@ const lastSide=f=>f.segs.length?f.segs[f.segs.length-1].side:null;
 const sorted=()=>feeds.slice().sort((a,b)=>b.start-a.start);
 const lastFeed=()=>sorted()[0]||null;
 const nextDue=()=>{const f=lastFeed();if(!f)return null;return (S.from==='end'?f.end:f.start)+S.interval*60000};
+// Confirmación en dos toques: los diálogos nativos del navegador no funcionan en visores embebidos
+function armConfirm(btn,label,fn){if(btn.dataset.armed){clearTimeout(btn._t);delete btn.dataset.armed;btn.textContent=btn.dataset.orig;fn();return}
+  btn.dataset.orig=btn.textContent;btn.dataset.armed='1';btn.textContent=label;btn._t=setTimeout(()=>{delete btn.dataset.armed;btn.textContent=btn.dataset.orig},4000)}
 let toastT;const toast=m=>{const t=$('toast');t.textContent=m;t.classList.add('on');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('on'),2200)};
 
 // ───────── Theme ─────────
@@ -320,12 +323,12 @@ function togglePause(){if(!active)return;const now=Date.now();
 function finishFeed(){if(!active)return;const now=Date.now();closeSeg(now);
   if(active.paused){active.pausedMs+=now-active.pauseStart}
   const segs=active.segs.filter(s=>s.end-s.start>=1000);
-  if(!segs.length){if(!confirm('La toma duró menos de un segundo. ¿Descartar?'))return;active=null;save(KEYA,null);wakeLock(false);render();return}
+  if(!segs.length){active=null;save(KEYA,null);wakeLock(false);render();toast('Toma demasiado corta, descartada');return}
   feeds.push({id:uid(),start:active.start,end:now,segs,note:''});save(KEY,feeds);
   active=null;save(KEYA,null);wakeLock(false);render();scheduleSW();toast('Toma guardada · '+fmtMin(eff(feeds[feeds.length-1]))+' efectivos')}
-function cancelFeed(){if(!active)return;if(!confirm('¿Descartar esta toma sin guardarla?'))return;active=null;save(KEYA,null);wakeLock(false);render()}
+function cancelFeed(){if(!active)return;active=null;save(KEYA,null);wakeLock(false);render();toast('Toma descartada')}
 $('startL').onclick=()=>startFeed('L');$('startR').onclick=()=>startFeed('R');
-$('btnSwitch').onclick=switchSide;$('btnPause').onclick=togglePause;$('btnFinish').onclick=finishFeed;$('btnCancel').onclick=cancelFeed;
+$('btnSwitch').onclick=switchSide;$('btnPause').onclick=togglePause;$('btnFinish').onclick=finishFeed;$('btnCancel').onclick=()=>armConfirm($('btnCancel'),'¿Descartar? Toca otra vez',cancelFeed);
 
 // Screen wake lock (best effort)
 let wl=null;async function wakeLock(on){try{if(on&&S.wake&&'wakeLock'in navigator){wl=await navigator.wakeLock.request('screen')}else if(!on&&wl){await wl.release();wl=null}}catch(e){}}
@@ -399,7 +402,7 @@ function openSheet(id){editId=id||null;const f=id?feeds.find(x=>x.id===id):null;
   $('eL').value=f?Math.round(effL(f)/60000):'';$('eR').value=f?Math.round(effR(f)/60000):'';
   $('eP').value=f?Math.round(((f.end-f.start)-eff(f))/60000):'';$('eFirst').value=f?f.segs[0].side:(lastFeed()&&lastSide(lastFeed())==='L'?'R':'L');
   $('eNote').value=f?f.note||'':'';$('sheetBg').classList.add('on')}
-function closeSheet(){$('sheetBg').classList.remove('on');editId=null}
+function closeSheet(){$('sheetBg').classList.remove('on');editId=null;const b=$('eDelete');if(b.dataset.armed){clearTimeout(b._t);delete b.dataset.armed;b.textContent=b.dataset.orig}}
 $('btnManual').onclick=()=>openSheet(null);$('eCancel').onclick=closeSheet;$('sheetBg').onclick=e=>{if(e.target===$('sheetBg'))closeSheet()};
 $('eSave').onclick=()=>{const L=Math.max(0,+$('eL').value||0),R=Math.max(0,+$('eR').value||0),P=Math.max(0,+$('eP').value||0);
   const start=new Date($('eDate').value+'T'+$('eTime').value).getTime();if(isNaN(start)){toast('Fecha u hora inválida');return}
@@ -413,7 +416,7 @@ $('eSave').onclick=()=>{const L=Math.max(0,+$('eL').value||0),R=Math.max(0,+$('e
   const rec={id:editId||uid(),start,end:t,segs,note:$('eNote').value.trim()};
   if(editId){feeds=feeds.map(f=>f.id===editId?rec:f)}else feeds.push(rec);
   save(KEY,feeds);closeSheet();render();renderHistory();scheduleSW();toast('Guardado')};
-$('eDelete').onclick=()=>{if(!editId||!confirm('¿Eliminar esta toma?'))return;feeds=feeds.filter(f=>f.id!==editId);save(KEY,feeds);closeSheet();render();renderHistory();scheduleSW();toast('Eliminada')};
+$('eDelete').onclick=()=>armConfirm($('eDelete'),'¿Seguro? Toca otra vez para eliminar',()=>{if(!editId)return;feeds=feeds.filter(f=>f.id!==editId);save(KEY,feeds);closeSheet();render();renderHistory();scheduleSW();toast('Toma eliminada')});
 
 // ───────── Settings ─────────
 function renderSettings(){$('sName').value=S.name;$('sBirth').value=S.birth;$('sInterval').value=S.interval;$('sFrom').value=S.from;$('sPre').value=S.pre;
@@ -466,9 +469,9 @@ $('btnExportCsv').onclick=()=>{const rows=[['fecha','inicio','fin','empezo_por',
 $('btnExportJson').onclick=()=>download('copia-tomas-'+dayKey(Date.now())+'.json',JSON.stringify({feeds,settings:S,exported:new Date().toISOString()},null,1),'application/json');
 $('btnImport').onclick=()=>$('fileImport').click();
 $('fileImport').onchange=e=>{const file=e.target.files[0];if(!file)return;const r=new FileReader();r.onload=()=>{try{const d=JSON.parse(r.result);
-  if(!Array.isArray(d.feeds))throw 0;if(!confirm('Se añadirán '+d.feeds.length+' tomas (las repetidas se ignoran). ¿Continuar?'))return;
+  if(!Array.isArray(d.feeds))throw 0;
   const ids=new Set(feeds.map(f=>f.id));d.feeds.forEach(f=>{if(!ids.has(f.id))feeds.push(f)});save(KEY,feeds);
-  if(d.settings)Object.assign(S,d.settings),save(KEYS,S);render();renderHistory();renderSettings();toast('Copia restaurada')}catch(x){toast('Archivo no válido')}};r.readAsText(file);e.target.value=''};
+  if(d.settings)Object.assign(S,d.settings),save(KEYS,S);render();renderHistory();renderSettings();toast('Copia restaurada: '+d.feeds.length+' tomas')}catch(x){toast('Archivo no válido')}};r.readAsText(file);e.target.value=''};
 
 // ───────── Init ─────────
 applyTheme();render();
